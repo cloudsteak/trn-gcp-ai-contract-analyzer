@@ -90,7 +90,7 @@ A [Google AI Studio](https://aistudio.google.com) fejlesztői felületen ugyanaz
 
 1. Nyisd meg: [https://aistudio.google.com](https://aistudio.google.com)
 2. Hozz létre egy **Playground** / **Chat** promptot.
-3. Válassz modellt (pl. `gemini-3.1-flash-lite` vagy elérhető Gemini 3 verzió).
+3. Válassz modellt (pl. `gemini-3.1-flash-lite` vagy más elérhető Gemini 3 verzió).
 4. Csatold a PDF szerződést (Upload file, vagy Drive integráció ha elérhető).
 5. Illeszd be a [2. szekció promptját](#elemzési-prompt).
 6. Futtasd, és értékeld a választ.
@@ -112,7 +112,7 @@ A [Google AI Studio](https://aistudio.google.com) fejlesztői felületen ugyanaz
 
 Ez a repository **production-ready** megoldást ad: React frontend, FastAPI backend, Gemini Enterprise Agent Platform API, Cloud Run deploy és GitHub Actions CI/CD.
 
-A backend **ugyanazt az elemzési logikát** implementálja, mint a fenti prompt – strukturált JSON választ ad vissza, amit a frontend megjelenít.
+A backend **ugyanazt az elemzési logikát** implementálja, mint a [2.](#2-szerződés-elemzés-gemini-vel) és [3.](#3-szerződés-elemzés-gemini-ai-studioval) szekcióban bemutatott prompt – csak kódban. A prompt szövege a `backend/main.py` fájlban található, az `ANALYSIS_PROMPT` konstansban (kb. 24–41. sor): ugyanazokat a JSON mezőket kéri (összefoglaló, kulcs klauzulák, kockázatok, szerződés minősítése), magyar nyelven. A backend ezt a promptot küldi a Gemini API-nak a feltöltött PDF mellett, majd a strukturált választ adja vissza, amit a frontend megjelenít.
 
 ### Architektúra
 
