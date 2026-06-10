@@ -97,15 +97,17 @@ flowchart TB
 
 ## Architektúra komponensek
 
-| Komponens | Technológia | Felelősség |
-|-----------|-------------|------------|
-| **Frontend** | React, Vite, `serve` | PDF feltöltés (drag-and-drop), elemzés indítása, eredmények megjelenítése magyar UI-val |
-| **Backend** | FastAPI, uvicorn, `google-genai` | PDF fogadása, Gemini hívás natív PDF inputtal, JSON válasz validálása |
-| **Gemini Enterprise Agent Platform** | `gemini-3.1-flash-lite` | Szerződés elemzése: összefoglaló, klauzulák, kockázati jelzések (korábban Vertex AI) |
-| **Cloud Run** | Source deploy (Docker nélkül) | Backend és frontend külön skálázható szolgáltatásként fut |
-| **Service Account** | `contract-analyzer-sa` | ADC a backend számára; IAM: `roles/aiplatform.user`, `roles/run.invoker` (platform API neve változatlan) |
-| **Cloud Build** | Buildpacks | Forráskódból image építés deploy során |
-| **GitHub Actions** | `lint.yml`, `deploy.yml` | PR lint; `main` branch push-ra automatikus GCP deploy |
+Minden komponens egy jól körülhatárolt felelősségi kör – így a backend és frontend egymástól függetlenül deployolható.
+
+| Komponens | Technológia | Felelősség | Miért külön? |
+|-----------|-------------|------------|--------------|
+| **Frontend** | React, Vite, `serve` | PDF feltöltés, elemzés indítása, eredmények megjelenítése | Csak UI – nem tartalmaz üzleti logikát vagy AI hívást |
+| **Backend** | FastAPI, uvicorn, `google-genai` | PDF fogadása, Gemini hívás, JSON validálás | Az AI integráció és adatfeldolgozás egy helyen, biztonságosan |
+| **Gemini Enterprise Agent Platform** | `gemini-3.1-flash-lite` | Szerződés elemzése magyar JSON-nal | Managed AI – nem kell saját modellt futtatni |
+| **Cloud Run** | Source deploy | Skálázható futtatás HTTPS-sel | Serverless – nincs szerver üzemeltetés |
+| **Service Account** | `contract-analyzer-sa` | ADC auth, IAM jogosultságok | Az alkalmazás ne a fejlesztő személyes credjével fusson |
+| **Cloud Build** | Buildpacks | Forráskódból image építés deploy-kor | Docker nélküli, egyszerű source deploy |
+| **GitHub Actions** | `lint.yml`, `deploy.yml` | Lint PR-en, deploy `main`-en | Reprodukálható CI/CD, nem kézi lépés |
 
 ### API végpontok
 
@@ -130,14 +132,74 @@ flowchart TB
 
 ## Előfeltételek
 
-- **Node.js** 20+
-- **uv** ([telepítés](https://docs.astral.sh/uv/))
-- **gcloud CLI** (GCP deploy-hoz)
-- **GCP projekt** Gemini Enterprise Agent Platform API-val (`aiplatform.googleapis.com`) és megfelelő IAM jogosultságokkal
+| Eszköz | Miért kell? |
+|--------|-------------|
+| **Node.js** 20+ | Frontend futtatásához és buildhez |
+| **uv** ([telepítés](https://docs.astral.sh/uv/)) | Backend függőségek kezelése |
+| **gcloud CLI** | GCP infrastruktúra (`setup.sh`) és helyi ADC auth |
+| **GCP projekt** | Gemini Enterprise Agent Platform API (`aiplatform.googleapis.com`) + IAM |
+
+---
+
+## Telepítési áttekintés
+
+A projektnek **két külön célja** van – ne keverd össze őket:
+
+| Környezet | Cél | Hogyan telepítünk? |
+|-----------|-----|---------------------|
+| **Helyi (fejlesztői gép)** | Gyors fejlesztés, hibakeresés, API teszt curl-lel | Kézzel: `uv` + `npm run dev` |
+| **GCP (production)** | Valódi felhasználók, Cloud Run | Automatikusan: **GitHub Actions** (`deploy.yml`) |
+
+```mermaid
+flowchart LR
+    subgraph Local["🏠 Helyi fejlesztés"]
+        L1["backend/.env"] --> L2["uv run uvicorn"]
+        L3["frontend/.env"] --> L4["npm run dev"]
+        L2 --> L5["curl / analyze teszt"]
+        L4 --> L5
+    end
+
+    subgraph GCP["☁️ GCP production – egyszeri + automatikus"]
+        S1["① setup.sh<br/>infrastruktúra"] --> S2["② GitHub Secrets"]
+        S2 --> S3["③ push → main"]
+        S3 --> S4["deploy.yml<br/>Cloud Run deploy"]
+    end
+
+    Local -.->|"kód kész, PR merge"| GCP
+
+    classDef local fill:#DBEAFE,stroke:#2563EB
+    classDef gcp fill:#DCFCE7,stroke:#16A34A
+    class Local local
+    class GCP gcp
+```
+
+### Ki mit csinál?
+
+| Lépés | Eszköz | Mit telepít? | Gyakoriság |
+|-------|--------|--------------|------------|
+| Infrastruktúra (API-k, SA, üres Cloud Run service) | `scripts/setup.sh` | GCP erőforrások – **nem** az alkalmazás kódját | Egyszer, projekt elején |
+| Alkalmazás kód (backend + frontend) | **GitHub Actions** `deploy.yml` | Forráskód → Cloud Run (source deploy) | Minden `main` push |
+| Lint ellenőrzés | GitHub Actions `lint.yml` | Kódminőség PR-en | Minden pull request |
+| Manuális `gcloud run deploy` | *(lásd lent)* | Ugyanaz, amit a CI is csinál | **Csak kivételes esetben** |
+
+> **Fontos:** A Cloud Run-ra való telepítés **alapértelmezetten a GitHub Actions-szel történik**. A `setup.sh` csak az infrastruktúrát készíti elő; magát az alkalmazást a `main` branch-re pusholt kód deployolja a CI.
 
 ---
 
 ## Helyi telepítés és tesztelés
+
+### Miért csináljuk?
+
+- **Gyorsabb iteráció** – nincs Cloud Build várakozás, azonnali reload.
+- **Olcsóbb** – fejlesztés közben nem fut Cloud Run és Gemini hívás csak tesztkor történik.
+- **Könnyebb hibakeresés** – logok a terminálban, breakpoint a kódban.
+- **CI előtti ellenőrzés** – amit helyben lefuttatsz, azt a PR-en is lefuttatja a `lint.yml`.
+
+### Miért a backenddel kezdünk?
+
+1. A **frontend a backend API-ra épül** – a `VITE_API_URL` a backend címére mutat.
+2. A **üzleti logika és a Gemini hívás** a backendben van – curl-lel önállóan is tesztelhető.
+3. Ha a backend `/analyze` működik, a frontend már csak megjelenít – kevesebb változó.
 
 ### 1. Backend
 
@@ -145,6 +207,8 @@ flowchart TB
 cd backend
 cp .env.example .env
 ```
+
+**Miért?** A backend környezeti változókból olvassa a GCP projektet, modellt és CORS beállítást – helyben is ugyanazt a Gemini API-t hívja, mint Cloud Run-on.
 
 Állítsd be a `.env` fájlban:
 
@@ -155,35 +219,31 @@ GCP_REGION=europe-west1
 CORS_ORIGINS=*
 ```
 
-Autentikáció (Application Default Credentials):
+**Miért kell az ADC?** A backend nem API kulcsot használ, hanem Application Default Credentials-t – ugyanazt az auth módot, mint Cloud Run-on a service account.
 
 ```bash
 gcloud auth application-default login
 gcloud config set project <a-gcp-projekt-id>
 ```
 
-Függőségek telepítése és indítás:
-
 ```bash
 uv sync
 uv run uvicorn main:app --reload --port 8080
 ```
 
-**Health check** (GCP konfiguráció nélkül is működik):
+**Health check** – ellenőrzi, hogy a szerver elindult-e (GCP nélkül is):
 
 ```bash
 curl http://localhost:8080/health
 # {"status":"rendben"}
 ```
 
-**Elemzés tesztelése** (működő GCP projekt és ADC szükséges):
+**Elemzés teszt** – ellenőrzi a teljes Gemini integrációt (GCP projekt + ADC kell):
 
 ```bash
 curl -X POST http://localhost:8080/analyze \
   -F "file=@/path/to/szerzodes.pdf;type=application/pdf"
 ```
-
-Várható hibák helyi környezetben:
 
 | Hiba | Ok |
 |------|-----|
@@ -193,6 +253,8 @@ Várható hibák helyi környezetben:
 
 ### 2. Frontend
 
+**Miért második?** A frontend csak HTTP kéréseket küld – futnia kell a backendnek, és a `VITE_API_URL`-nek arra kell mutatnia.
+
 ```bash
 cd frontend
 cp .env.example .env
@@ -200,23 +262,20 @@ npm install
 npm run dev
 ```
 
-A `.env` fájlban:
-
 ```env
 VITE_API_URL=http://localhost:8080
 ```
 
-Nyisd meg: [http://localhost:5173](http://localhost:5173)
+**Miért build időben kell a URL?** A Vite a `VITE_*` változókat a build során beégeti a bundle-be – helyben a dev szerver, Cloud Run-on a CI adja meg deploy-kor.
 
-Tölts fel egy PDF-et, kattints az **Elemzés indítása** gombra, és ellenőrizd a három eredményszekciót.
+Nyisd meg: [http://localhost:5173](http://localhost:5173) – tölts fel PDF-et, indítsd az elemzést, ellenőrizd a három eredményszekciót.
 
 ### 3. Lint ellenőrzés
 
-```bash
-# Backend
-cd backend && uv sync --group dev && uv run ruff check .
+**Miért?** Ugyanazokat a szabályokat futtatja, mint a CI – így a PR nem bukik meg meglepetés lint hibán.
 
-# Frontend
+```bash
+cd backend && uv sync --group dev && uv run ruff check .
 cd frontend && npm install && npm run lint && npm run build
 ```
 
@@ -224,7 +283,25 @@ cd frontend && npm install && npm run lint && npm run build
 
 ## GCP telepítés és tesztelés
 
-### 1. Infrastruktúra felállítása
+### Miért csináljuk?
+
+- A helyi gép **nem production környezet** – skálázás, HTTPS, stabil URL csak Cloud Run-on van.
+- A **GitHub Actions** biztosítja, hogy minden `main`-re kerülő kód automatikusan, reprodukálható módon deployolódjon.
+
+### Telepítési sorrend (ajánlott)
+
+```
+① setup.sh          →  GCP infrastruktúra (egyszer)
+② GitHub Secrets    →  CI hitelesítés
+③ git push main     →  alkalmazás deploy (automatikus, deploy.yml)
+④ tesztelés         →  Cloud Run URL-eken
+```
+
+---
+
+### ① Infrastruktúra – `setup.sh` (egyszer)
+
+**Miért külön script?** A GitHub Actions **nem** hoz létre service accountot vagy engedélyez API-kat – csak a meglévő Cloud Run service-ekre deployol. Az infrastruktúrát egyszer, kézzel kell felállítani.
 
 ```bash
 export GCP_PROJECT_ID=<a-gcp-projekt-id>
@@ -233,52 +310,55 @@ export GCP_PROJECT_ID=<a-gcp-projekt-id>
 
 A script:
 
-1. Engedélyezi a szükséges API-kat (`run`, `aiplatform` – Gemini Enterprise Agent Platform, `cloudbuild`)
+1. Engedélyezi a szükséges API-kat (`run`, `aiplatform`, `cloudbuild`)
 2. Létrehozza a `contract-analyzer-sa` service accountot
-3. IAM szerepköröket rendel hozzá
+3. IAM szerepköröket rendel hozzá (`aiplatform.user`, `run.invoker`)
 4. Cloud Run service-eket hoz létre placeholder image-dzsel
-5. Környezeti változókat állít be
+5. Alap környezeti változókat állít be
 6. Kiírja a backend és frontend URL-eket
 
-### 2. GitHub Secrets (automatikus deploy-hoz)
+> A placeholder image **nem** a valódi alkalmazás – az első sikeres `deploy.yml` futás cseréli le a tényleges kódra.
 
-| Secret | Leírás |
-|--------|--------|
-| `GCP_PROJECT_ID` | GCP projekt azonosító |
-| `GCP_SA_KEY` | Service account JSON kulcs (deploy jogosultságokkal) |
+---
 
-A `main` branch push-ra a `deploy.yml` workflow source deploy-tal feltölti a backendet és frontendet Cloud Run-ra.
+### ② GitHub Secrets (CI deploy-hoz)
 
-### 3. Manuális deploy (opcionális)
+**Miért?** A `deploy.yml` workflow-nak GCP hozzáférés kell a Cloud Run deploy-hoz – ezt Secrets-ből kapja, nem a repóból.
 
-**Backend:**
+| Secret | Miért kell? |
+|--------|-------------|
+| `GCP_PROJECT_ID` | Melyik GCP projektbe deployoljon |
+| `GCP_SA_KEY` | Service account JSON kulcs Cloud Run és Cloud Build jogosultságokkal |
+
+A Secrets beállítása után **minden `main` push automatikusan deployol**:
+
+1. `deploy.yml` → backend source deploy Cloud Run-ra
+2. `deploy.yml` → frontend source deploy (a backend URL-jével build időben)
+
+**Nincs szükség kézi `gcloud run deploy`-ra a normál munkafolyamatban.**
+
+---
+
+### ③ Alkalmazás deploy – GitHub Actions (automatikus)
+
+**Miért így?** Reprodukálható, verziózott, auditálható deploy – minden release a git history-hoz kötött, nem egy fejlesztő gépén futó parancs.
 
 ```bash
-cd backend
-gcloud run deploy contract-analyzer-backend \
-  --source . \
-  --region europe-west1 \
-  --allow-unauthenticated \
-  --service-account contract-analyzer-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com \
-  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${GCP_PROJECT_ID},GCP_REGION=europe-west1,CORS_ORIGINS=*"
+git push origin main
 ```
 
-**Frontend** (a backend URL-jét build időben kell megadni):
+A `deploy.yml` a `.github/workflows/` mappából:
 
-```bash
-BACKEND_URL=$(gcloud run services describe contract-analyzer-backend \
-  --region europe-west1 --format='value(status.url)')
+- Backend: `gcloud run deploy contract-analyzer-backend --source ./backend`
+- Frontend: `gcloud run deploy contract-analyzer-frontend --source ./frontend` + `VITE_API_URL` build env
 
-cd frontend
-gcloud run deploy contract-analyzer-frontend \
-  --source . \
-  --region europe-west1 \
-  --allow-unauthenticated \
-  --service-account contract-analyzer-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com \
-  --set-build-env-vars="VITE_API_URL=${BACKEND_URL}"
-```
+Ellenőrzés: GitHub → **Actions** fül → legutóbbi workflow futás.
 
-### 4. GCP tesztelés
+---
+
+### ④ GCP tesztelés
+
+**Miért?** Deploy után ellenőrizni kell, hogy a Cloud Run környezet (service account, env vars, hálózat) is működik – a helyi siker még nem garantálja.
 
 **Backend health:**
 
@@ -298,16 +378,18 @@ FRONTEND_URL=$(gcloud run services describe contract-analyzer-frontend \
 echo "Nyisd meg: ${FRONTEND_URL}"
 ```
 
-Tölts fel egy PDF szerződést, és ellenőrizd, hogy az eredmény magyar nyelven jelenik meg.
-
-**Elemzés curl-lel a Cloud Run backenden:**
+**Elemzés curl-lel:**
 
 ```bash
 curl -X POST "${BACKEND_URL}/analyze" \
   -F "file=@/path/to/szerzodes.pdf;type=application/pdf"
 ```
 
-### 5. Erőforrások törlése
+---
+
+### ⑤ Erőforrások törlése – `teardown.sh`
+
+**Miért?** Fejlesztés vagy demo után ne maradjanak felesleges Cloud Run service-ek és IAM kötések – költség és biztonság.
 
 ```bash
 export GCP_PROJECT_ID=<a-gcp-projekt-id>
@@ -316,17 +398,60 @@ export GCP_PROJECT_ID=<a-gcp-projekt-id>
 
 ---
 
+### Manuális deploy – csak kivételes esetben
+
+**Miért van egyáltalán?** A `gcloud run deploy` parancs **ugyanazt csinálja**, amit a `deploy.yml` – manuálisan csak akkor futtasd, ha:
+
+- a GitHub Actions **nem elérhető** (pl. Actions leállás, secret hiba debug)
+- **első deploy előtt** teszteled a gcloud parancsot
+- **hotfix** kell, de még nem merge-elted a `main`-t
+
+Normál munkafolyamatban **ne használd** – a CI a single source of truth.
+
+<details>
+<summary>Kézi deploy parancsok (fallback)</summary>
+
+```bash
+export GCP_PROJECT_ID=<a-gcp-projekt-id>
+
+# Backend
+cd backend
+gcloud run deploy contract-analyzer-backend \
+  --source . \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --service-account contract-analyzer-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com \
+  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${GCP_PROJECT_ID},GCP_REGION=europe-west1,CORS_ORIGINS=*"
+
+# Frontend
+BACKEND_URL=$(gcloud run services describe contract-analyzer-backend \
+  --region europe-west1 --format='value(status.url)')
+
+cd ../frontend
+gcloud run deploy contract-analyzer-frontend \
+  --source . \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --service-account contract-analyzer-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com \
+  --set-build-env-vars="VITE_API_URL=${BACKEND_URL}"
+```
+
+</details>
+
+---
+
 ## Működik-e?
 
-| Réteg | Állapot | Megjegyzés |
-|-------|---------|------------|
-| Frontend build + lint | Működik | `npm run build` és `npm run lint` sikeres |
-| Backend lint | Működik | `uv run ruff check` sikeres |
-| `/health` helyben | Működik | GCP konfiguráció nélkül is elindul |
-| `/analyze` | GCP függő | Érvényes `GCP_PROJECT_ID`, ADC és Gemini Enterprise Agent Platform API szükséges |
-| GCP deploy | Konfiguráció függő | `setup.sh` + GitHub Secrets + `main` push |
+| Réteg | Állapot | Miért / megjegyzés |
+|-------|---------|---------------------|
+| Frontend build + lint | ✅ | Független a GCP-től – csak Node.js kell |
+| Backend lint | ✅ | Független a GCP-től – csak uv kell |
+| `/health` helyben | ✅ | Nem hív Gemini-t, csak az API elérhetőségét jelzi |
+| `/analyze` helyben | ⚠️ GCP kell | Gemini hívás ADC-vel – ugyanaz, mint Cloud Run-on |
+| GCP infrastruktúra | ⚠️ Egyszer kézzel | `setup.sh` – a CI ezt nem csinálja meg helyetted |
+| GCP alkalmazás deploy | ⚠️ CI-vel | `git push main` → `deploy.yml` – **ez az alapértelmezett út** |
 
-A teljes end-to-end elemzés **csak működő GCP környezetben** fut le: a backend a Gemini Enterprise Agent Platformon futó Gemini modellt hívja ADC-vel, a PDF-et natívan adja át, és magyar nyelvű JSON-t vár vissza.
+A teljes end-to-end elemzés **működő GCP környezetben** fut le: a backend a Gemini Enterprise Agent Platformon hívja a modellt ADC-vel, a PDF-et natívan adja át, és magyar nyelvű JSON-t vár vissza.
 
 ---
 
