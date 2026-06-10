@@ -5,11 +5,13 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
+
+from rag import build_policy_context, build_rag_prompt, get_rag_status, is_rag_available
 
 load_dotenv()
 
@@ -75,8 +77,17 @@ class TokenUsage(BaseModel):
     thoughts_tokens: int | None = None
 
 
+class PolicyFinding(BaseModel):
+    policy: str
+    status: Literal["compliant", "warning", "violation"]
+    quote: str = Field(default="", max_length=4000)
+    explanation: str = Field(..., max_length=2000)
+
+
 class AnalyzeResponse(AnalysisResult):
     token_usage: TokenUsage
+    rag_used: bool = False
+    policy_findings: list[PolicyFinding] | None = None
 
 
 def _parse_cors_origins(raw: str) -> list[str]:
@@ -98,13 +109,25 @@ def _build_genai_client() -> genai.Client:
     )
 
 
-def _parse_analysis_response(raw_text: str) -> AnalysisResult:
+class RagAnalysisPayload(AnalysisResult):
+    policy_findings: list[PolicyFinding] = Field(default_factory=list)
+
+
+def _parse_analysis_response(
+    raw_text: str,
+    *,
+    include_policy_findings: bool,
+) -> tuple[AnalysisResult, list[PolicyFinding] | None]:
     try:
         payload = json.loads(raw_text)
     except json.JSONDecodeError as exc:
         raise ValueError("A Gemini válasz nem érvényes JSON") from exc
 
-    return AnalysisResult.model_validate(payload)
+    if include_policy_findings:
+        rag_result = RagAnalysisPayload.model_validate(payload)
+        return rag_result, rag_result.policy_findings
+
+    return AnalysisResult.model_validate(payload), None
 
 
 def _extract_token_usage(response: types.GenerateContentResponse) -> TokenUsage:
@@ -133,15 +156,24 @@ def _get_genai_client() -> genai.Client:
     return genai_client
 
 
-async def _analyze_pdf(pdf_bytes: bytes) -> AnalyzeResponse:
+async def _analyze_pdf(pdf_bytes: bytes, *, use_rag: bool = False) -> AnalyzeResponse:
     # A PDF-et nativan adjuk at a Gemini API-nak, szoveg konverzio nelkul
     client = _get_genai_client()
+
+    prompt = ANALYSIS_PROMPT
+    rag_active = use_rag and is_rag_available()
+
+    if rag_active:
+        policy_context = build_policy_context()
+        if not policy_context:
+            raise ValueError("Nincs elerheto belso szabalyzat a RAG elemzeshez")
+        prompt = build_rag_prompt(ANALYSIS_PROMPT, policy_context)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[
             types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-            ANALYSIS_PROMPT,
+            prompt,
         ],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -152,10 +184,15 @@ async def _analyze_pdf(pdf_bytes: bytes) -> AnalyzeResponse:
     if not response.text:
         raise ValueError("A Gemini üres választ adott vissza")
 
-    analysis = _parse_analysis_response(response.text)
+    analysis, policy_findings = _parse_analysis_response(
+        response.text,
+        include_policy_findings=rag_active,
+    )
     return AnalyzeResponse(
         **analysis.model_dump(),
         token_usage=_extract_token_usage(response),
+        rag_used=rag_active,
+        policy_findings=policy_findings,
     )
 
 
@@ -180,8 +217,16 @@ async def health() -> dict[str, str]:
     return {"status": "rendben"}
 
 
+@app.get("/rag/status")
+async def rag_status() -> dict[str, object]:
+    return get_rag_status()
+
+
 @app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(file: UploadFile = File(...)) -> AnalyzeResponse:
+async def analyze(
+    file: UploadFile = File(...),
+    use_rag: bool = Form(False),
+) -> AnalyzeResponse:
     if file.content_type not in ("application/pdf", "application/x-pdf"):
         raise HTTPException(status_code=400, detail="Csak PDF fájl támogatott")
 
@@ -193,8 +238,14 @@ async def analyze(file: UploadFile = File(...)) -> AnalyzeResponse:
     if len(pdf_bytes) > max_pdf_size:
         raise HTTPException(status_code=400, detail="A PDF fájl meghaladja az 50 MB-os limitet")
 
+    if use_rag and not is_rag_available():
+        raise HTTPException(
+            status_code=400,
+            detail="A RAG modul nincs engedelyezve vagy nincs szabalyzat betoltve",
+        )
+
     try:
-        return await _analyze_pdf(pdf_bytes)
+        return await _analyze_pdf(pdf_bytes, use_rag=use_rag)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
