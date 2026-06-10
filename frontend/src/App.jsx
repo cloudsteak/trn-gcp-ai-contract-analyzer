@@ -1,6 +1,18 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+
+const POLICY_STATUS_LABELS = {
+  compliant: "Megfelel",
+  warning: "Figyelmeztetés",
+  violation: "Sértés",
+};
+
+function getPolicyStatusClass(status) {
+  if (status === "compliant") return "policy--compliant";
+  if (status === "warning") return "policy--warning";
+  return "policy--violation";
+}
 
 function validatePdf(file) {
   if (!file) {
@@ -29,6 +41,25 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [ragAvailable, setRagAvailable] = useState(false);
+  const [useRag, setUseRag] = useState(false);
+
+  useEffect(() => {
+    const loadRagStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/rag/status`);
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json();
+        setRagAvailable(Boolean(payload.available));
+      } catch {
+        setRagAvailable(false);
+      }
+    };
+
+    loadRagStatus();
+  }, []);
 
   const handleFileSelection = (file) => {
     const validationError = validatePdf(file);
@@ -77,6 +108,7 @@ function App() {
 
     const formData = new FormData();
     formData.append("file", selectedFile);
+    formData.append("use_rag", useRag ? "true" : "false");
 
     try {
       const response = await fetch(`${API_URL}/analyze`, {
@@ -138,6 +170,17 @@ function App() {
               <p className="selected-file">Kiválasztva: {selectedFile.name}</p>
             )}
           </div>
+
+          {ragAvailable && (
+            <label className="rag-toggle">
+              <input
+                type="checkbox"
+                checked={useRag}
+                onChange={(event) => setUseRag(event.target.checked)}
+              />
+              <span>Belső szabályzatokkal összevetés (RAG)</span>
+            </label>
+          )}
 
           <button
             type="button"
@@ -278,6 +321,29 @@ function App() {
                 <p>Nem található kockázatos rész.</p>
               )}
             </article>
+
+            {result.rag_used && result.policy_findings?.length > 0 && (
+              <article className="result-card result-card--policy">
+                <h2>Belső szabályzatokkal való összevetés</h2>
+                <ul className="policy-list">
+                  {result.policy_findings.map((finding, index) => (
+                    <li
+                      key={`${finding.policy}-${index}`}
+                      className={`policy-item ${getPolicyStatusClass(finding.status)}`}
+                    >
+                      <div className="policy-item-header">
+                        <h3>{finding.policy}</h3>
+                        <span className="policy-badge">
+                          {POLICY_STATUS_LABELS[finding.status] || finding.status}
+                        </span>
+                      </div>
+                      {finding.quote && <blockquote>{finding.quote}</blockquote>}
+                      <p>{finding.explanation}</p>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
           </section>
         )}
       </main>
