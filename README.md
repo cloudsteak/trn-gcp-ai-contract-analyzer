@@ -44,12 +44,12 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    subgraph L1["① Felhasználói réteg"]
+    subgraph L1["1. Felhasználói réteg"]
         direction LR
         Browser(["🌐 Böngésző<br/>PDF feltöltés · eredmény megjelenítés"])
     end
 
-    subgraph L2["② Alkalmazás réteg · Cloud Run · europe-west1"]
+    subgraph L2["2. Alkalmazás réteg · Cloud Run · europe-west1"]
         direction LR
         subgraph CR_FE["Frontend service"]
             FE["🖥️ contract-analyzer-frontend<br/><b>React + Vite + serve</b><br/>Port: 8080"]
@@ -59,31 +59,31 @@ flowchart TB
         end
     end
 
-    subgraph L3["③ AI réteg · Gemini Enterprise Agent Platform"]
+    subgraph L3["3. AI réteg · Gemini Enterprise Agent Platform"]
         direction TB
         GEAP["🤖 gemini-3.1-flash-lite<br/>global endpoint · JSON válasz"]
         SA["🔐 contract-analyzer-sa<br/>ADC · roles/aiplatform.user"]
     end
 
-    subgraph L4["④ Infrastruktúra · Deploy"]
+    subgraph L4["4. Infrastruktúra · Deploy"]
         direction LR
         CB["🏗️ Cloud Build<br/>source deploy<br/>buildpacks"]
         GH["📦 GitHub<br/>push → main"]
     end
 
-    subgraph L5["⑤ CI/CD · GitHub Actions"]
+    subgraph L5["5. CI/CD · GitHub Actions"]
         direction LR
         Lint["✅ lint.yml<br/>PR · ruff · eslint"]
         Deploy["🚀 deploy.yml<br/>main · Cloud Run"]
     end
 
     %% Fő adatfolyam – elemzés
-    Browser ==>|"① PDF + kérés"| FE
-    FE ==>|"② POST /analyze"| BE
-    BE ==>|"③ PDF + magyar prompt"| GEAP
-    GEAP ==>|"④ JSON elemzés"| BE
-    BE ==>|"⑤ contract_quality · summary · key_clauses · risk_flags · token_usage"| FE
-    FE ==>|"⑥ UI render"| Browser
+    Browser ==>|"1. PDF + kérés"| FE
+    FE ==>|"2. POST /analyze"| BE
+    BE ==>|"3. PDF + magyar prompt"| GEAP
+    GEAP ==>|"4. JSON elemzés"| BE
+    BE ==>|"5. elemzés + token_usage"| FE
+    FE ==>|"6. UI render"| Browser
 
     %% Másodlagos kapcsolatok
     Browser -.->|"health check"| BE
@@ -215,9 +215,9 @@ flowchart LR
     end
 
     subgraph GCP["☁️ GCP production – egyszeri + automatikus"]
-        S1["① setup.sh<br/>infrastruktúra"] --> S2["② setup-wif.sh<br/>GitHub WIF"]
-        S2 --> S3["③ GitHub Secrets"]
-        S3 --> S4["④ push → main"]
+        S1["1. setup.sh<br/>infrastruktúra"] --> S2["2. setup-wif.sh<br/>GitHub WIF"]
+        S2 --> S3["3. GitHub Secrets"]
+        S3 --> S4["4. push → main"]
         S4 --> S5["deploy.yml"]
     end
 
@@ -353,16 +353,16 @@ cd frontend && npm install && npm run lint && npm run build
 ### Telepítési sorrend (ajánlott)
 
 ```
-① setup.sh          →  GCP infrastruktúra (egyszer)
-② setup-wif.sh      →  GitHub Actions WIF (egyszer, JSON kulcs nélkül)
-③ GitHub Secrets    →  WIF provider + service account azonosítók
-④ git push main     →  alkalmazás deploy (automatikus, deploy.yml)
-⑤ tesztelés         →  Cloud Run URL-eken
+1. setup.sh          →  GCP infrastruktúra (egyszer)
+2. setup-wif.sh      →  GitHub Actions WIF (egyszer, JSON kulcs nélkül)
+3. GitHub Secrets    →  WIF provider + service account azonosítók
+4. git push main     →  alkalmazás deploy (automatikus, deploy.yml)
+5. tesztelés         →  Cloud Run URL-eken
 ```
 
 ---
 
-### ① Infrastruktúra – `setup.sh` (egyszer)
+### 1. Infrastruktúra – `setup.sh` (egyszer)
 
 **Miért külön script?** A GitHub Actions **nem** hoz létre service accountot vagy engedélyez API-kat – csak a meglévő Cloud Run service-ekre deployol. Az infrastruktúrát egyszer, kézzel kell felállítani.
 
@@ -384,7 +384,7 @@ A script:
 
 ---
 
-### ② GitHub Actions hitelesítés – WIF (JSON kulcs nélkül)
+### 2. GitHub Actions hitelesítés – WIF (JSON kulcs nélkül)
 
 **Miért WIF?** Sok GCP szervezetben tiltott a service account JSON kulcs letöltése. A **Workload Identity Federation** (WIF) lehetővé teszi, hogy a GitHub Actions OIDC tokennel, kulcs nélkül hitelesüljön.
 
@@ -434,7 +434,7 @@ A Secrets beállítása után **minden `main` push automatikusan deployol**:
 
 ---
 
-### ③ Alkalmazás deploy – GitHub Actions (automatikus)
+### 3. Alkalmazás deploy – GitHub Actions (automatikus)
 
 **Miért így?** Reprodukálható, verziózott, auditálható deploy – minden release a git history-hoz kötött, nem egy fejlesztő gépén futó parancs.
 
@@ -451,7 +451,7 @@ Ellenőrzés: GitHub → **Actions** fül → legutóbbi workflow futás.
 
 ---
 
-### ④ GCP tesztelés
+### 4. GCP tesztelés
 
 **Miért?** Deploy után ellenőrizni kell, hogy a Cloud Run környezet (service account, env vars, hálózat) is működik – a helyi siker még nem garantálja.
 
@@ -482,7 +482,7 @@ curl -X POST "${BACKEND_URL}/analyze" \
 
 ---
 
-### ⑤ Erőforrások törlése
+### 5. Erőforrások törlése
 
 **Miért?** Fejlesztés vagy demo után ne maradjanak felesleges Cloud Run service-ek és IAM kötések – költség és biztonság.
 
