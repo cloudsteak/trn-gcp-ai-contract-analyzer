@@ -1,6 +1,6 @@
 # Szerződéselemző rendszer
 
-PDF szerződések elemzése a Gemini API (Gemini Enterprise Agent Platform) segítségével. A rendszer strukturált magyar nyelvű eredményt ad vissza: összefoglaló, kulcs klauzulák és kockázatos részek.
+PDF szerződések elemzése a Gemini API (Gemini Enterprise Agent Platform) segítségével. A rendszer strukturált magyar nyelvű eredményt ad vissza: megfelelőségi skála, összefoglaló, kulcs klauzulák, kockázatos részek és token felhasználás.
 
 > **Megjegyzés:** A korábbi **Vertex AI** platformot Google a **Gemini Enterprise Agent Platform** néven egyesítette (Google Cloud Next ’26). A technikai API-k (`aiplatform.googleapis.com`) és IAM szerepkörök (`roles/aiplatform.user`) továbbra is ezt a nevet használják.
 
@@ -46,7 +46,7 @@ flowchart TB
     FE ==>|"② POST /analyze"| BE
     BE ==>|"③ PDF + magyar prompt"| GEAP
     GEAP ==>|"④ JSON elemzés"| BE
-    BE ==>|"⑤ summary · key_clauses · risk_flags"| FE
+    BE ==>|"⑤ contract_quality · summary · key_clauses · risk_flags · token_usage"| FE
     FE ==>|"⑥ UI render"| Browser
 
     %% Másodlagos kapcsolatok
@@ -101,7 +101,7 @@ Minden komponens egy jól körülhatárolt felelősségi kör – így a backend
 
 | Komponens | Technológia | Felelősség | Miért külön? |
 |-----------|-------------|------------|--------------|
-| **Frontend** | React, Vite, `serve` | PDF feltöltés, elemzés indítása, eredmények megjelenítése | Csak UI – nem tartalmaz üzleti logikát vagy AI hívást |
+| **Frontend** | React, Vite, `serve` | PDF feltöltés, elemzés, megfelelőségi skála, eredmények, token statisztika | Csak UI – nem tartalmaz üzleti logikát vagy AI hívást |
 | **Backend** | FastAPI, uvicorn, `google-genai` | PDF fogadása, Gemini hívás, JSON validálás | Az AI integráció és adatfeldolgozás egy helyen, biztonságosan |
 | **Gemini Enterprise Agent Platform** | `gemini-3.1-flash-lite` | Szerződés elemzése magyar JSON-nal | Managed AI – nem kell saját modellt futtatni |
 | **Cloud Run** | Source deploy | Skálázható futtatás HTTPS-sel | Serverless – nincs szerver üzemeltetés |
@@ -120,15 +120,34 @@ Minden komponens egy jól körülhatárolt felelősségi kör – így a backend
 
 ```json
 {
+  "contract_quality": {
+    "score": 7,
+    "level": "green",
+    "label": "Korrekt",
+    "explanation": "Rövid indoklás magyarul."
+  },
   "summary": "A szerződés rövid összefoglalója (max. 5 mondat, magyarul)",
   "key_clauses": [
     { "title": "Klauzula címe", "description": "Rövid leírás" }
   ],
   "risk_flags": [
     { "quote": "Idézet a szerződésből", "explanation": "Miért kockázatos" }
-  ]
+  ],
+  "token_usage": {
+    "prompt_tokens": 1234,
+    "response_tokens": 567,
+    "total_tokens": 1801,
+    "cached_tokens": null,
+    "thoughts_tokens": null
+  }
 }
 ```
+
+| Mező | Forrás | Leírás |
+|------|--------|--------|
+| `contract_quality` | Gemini | 1–10 skála, zöld/sárga/piros szint, magyar címke és indoklás |
+| `summary`, `key_clauses`, `risk_flags` | Gemini | Elemzés magyar szöveggel |
+| `token_usage` | API metaadat | Bemenet/kimenet token számok (a backend számolja, nem a modell generálja) |
 
 ## Előfeltételek
 
@@ -153,7 +172,7 @@ A projektnek **két külön célja** van – ne keverd össze őket:
 ```mermaid
 flowchart LR
     subgraph Local["🏠 Helyi fejlesztés"]
-        L1["backend/.env"] --> L2["uv run uvicorn"]
+        L1["backend/.env"] --> L2["./dev.sh"]
         L3["frontend/.env"] --> L4["npm run dev"]
         L2 --> L5["curl / analyze teszt"]
         L4 --> L5
@@ -273,7 +292,7 @@ VITE_API_URL=http://localhost:8080
 
 **Miért build időben kell a URL?** A Vite a `VITE_*` változókat a build során beégeti a bundle-be – helyben a dev szerver, Cloud Run-on a CI adja meg deploy-kor.
 
-Nyisd meg: [http://localhost:5173](http://localhost:5173) – tölts fel PDF-et, indítsd az elemzést, ellenőrizd a három eredményszekciót.
+Nyisd meg: [http://localhost:5173](http://localhost:5173) – tölts fel PDF-et, indítsd az elemzést, ellenőrizd a megfelelőségi skálát, az eredményszekciókat és a token felhasználást.
 
 ### 3. Lint ellenőrzés
 
@@ -464,7 +483,7 @@ A teljes end-to-end elemzés **működő GCP környezetben** fut le: a backend a
 
 ```
 trn-gcp-ai-contract-analyzer/
-├── backend/           # FastAPI backend
+├── backend/           # FastAPI backend (main.py, dev.sh, pyproject.toml)
 ├── frontend/          # React + Vite UI
 ├── scripts/           # setup.sh, teardown.sh
 ├── .github/workflows/ # lint.yml, deploy.yml
