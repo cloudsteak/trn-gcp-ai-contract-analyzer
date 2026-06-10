@@ -25,7 +25,7 @@ flowchart TB
 
     subgraph L3["③ AI réteg · Gemini Enterprise Agent Platform"]
         direction TB
-        GEAP["🤖 gemini-3.1-flash-lite<br/>PDF natív elemzés · JSON válasz"]
+        GEAP["🤖 gemini-3.1-flash-lite<br/>global endpoint · JSON válasz"]
         SA["🔐 contract-analyzer-sa<br/>ADC · roles/aiplatform.user"]
     end
 
@@ -215,9 +215,11 @@ cp .env.example .env
 ```env
 GEMINI_MODEL=gemini-3.1-flash-lite
 GCP_PROJECT_ID=<a-gcp-projekt-id>
-GCP_REGION=europe-west1
+GEMINI_LOCATION=global
 CORS_ORIGINS=*
 ```
+
+> **Miért `GEMINI_LOCATION=global`?** A `gemini-3.1-flash-lite` modell csak a **global** Vertex/Gemini endpointon érhető el – nem regionalis (pl. `europe-west1`) location-nel. A Cloud Run továbbra is `europe-west1`-en fut; ez külön beállítás a deploy scriptekben (`GCP_REGION`).
 
 **Miért kell az ADC?** A backend nem API kulcsot használ, hanem Application Default Credentials-t – ugyanazt az auth módot, mint Cloud Run-on a service account.
 
@@ -228,8 +230,10 @@ gcloud config set project <a-gcp-projekt-id>
 
 ```bash
 uv sync
-uv run uvicorn main:app --reload --port 8080
+./dev.sh
 ```
+
+> **Fontos:** Ne a globális `uvicorn` parancsot használd – `ModuleNotFoundError: No module named 'google'` hibát kapsz. A függőségek a projekt `.venv`-jében vannak. Használd: `./dev.sh` vagy `uv run python -m uvicorn main:app --reload --port 8080`.
 
 **Health check** – ellenőrzi, hogy a szerver elindult-e (GCP nélkül is):
 
@@ -250,6 +254,7 @@ curl -X POST http://localhost:8080/analyze \
 | `503 – A GCP_PROJECT_ID környezeti változó kötelező` | `.env` nincs kitöltve |
 | `500 – A szerződés elemzése sikertelen` | Nincs ADC, vagy hiányzó Gemini Enterprise Agent Platform jogosultság |
 | `502 – A Gemini válasz nem érvényes JSON` | Modell válasz formátum hiba |
+| `ModuleNotFoundError: No module named 'google'` | Globális Python/uvicorn fut – használd: `uv sync` majd `./dev.sh` |
 
 ### 2. Frontend
 
@@ -421,7 +426,7 @@ gcloud run deploy contract-analyzer-backend \
   --region europe-west1 \
   --allow-unauthenticated \
   --service-account contract-analyzer-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com \
-  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${GCP_PROJECT_ID},GCP_REGION=europe-west1,CORS_ORIGINS=*"
+  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${GCP_PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
 
 # Frontend
 BACKEND_URL=$(gcloud run services describe contract-analyzer-backend \

@@ -40,7 +40,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --service-account "${SERVICE_ACCOUNT}" \
-            --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},GCP_REGION=${GCP_REGION},CORS_ORIGINS=*"
+            --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},GEMINI_LOCATION=global,CORS_ORIGINS=*"
 
   deploy-frontend:
     runs-on: ubuntu-latest

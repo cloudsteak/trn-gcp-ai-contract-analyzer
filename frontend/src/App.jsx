@@ -12,6 +12,16 @@ function validatePdf(file) {
   return "";
 }
 
+function formatScorePercent(score) {
+  return Math.round((score / 10) * 100);
+}
+
+function getQualityClass(level) {
+  if (level === "green") return "quality--green";
+  if (level === "yellow") return "quality--yellow";
+  return "quality--red";
+}
+
 function App() {
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -154,6 +164,84 @@ function App() {
 
         {result && (
           <section className="results">
+            {result.contract_quality && (
+              <article
+                className={`result-card result-card--quality ${getQualityClass(result.contract_quality.level)}`}
+              >
+                <div className="quality-header">
+                  <h2>Szerződés megfelelősége</h2>
+                  <span className="quality-badge">{result.contract_quality.label}</span>
+                </div>
+
+                <div className="quality-score-row">
+                  <span className="quality-score">{result.contract_quality.score}</span>
+                  <span className="quality-score-max">/ 10</span>
+                  <span className="quality-score-percent">
+                    ({formatScorePercent(result.contract_quality.score)}%)
+                  </span>
+                </div>
+
+                <div
+                  className="quality-meter"
+                  role="meter"
+                  aria-valuemin={1}
+                  aria-valuemax={10}
+                  aria-valuenow={result.contract_quality.score}
+                  aria-label={`Szerződés megfelelősége: ${result.contract_quality.score} a 10-ből`}
+                >
+                  <div className="quality-meter-track">
+                    <div
+                      className="quality-meter-fill"
+                      style={{ width: `${formatScorePercent(result.contract_quality.score)}%` }}
+                    />
+                    <div
+                      className="quality-meter-marker"
+                      style={{ left: `${formatScorePercent(result.contract_quality.score)}%` }}
+                    />
+                  </div>
+                  <div className="quality-meter-labels">
+                    <span>Kockázatos</span>
+                    <span>Figyelmet igényel</span>
+                    <span>Korrekt</span>
+                  </div>
+                </div>
+
+                <p className="quality-explanation">{result.contract_quality.explanation}</p>
+              </article>
+            )}
+
+            {result.token_usage && (
+              <article className="result-card result-card--usage">
+                <h2>Token felhasználás</h2>
+                <dl className="token-usage">
+                  <div>
+                    <dt>Bemenet</dt>
+                    <dd>{result.token_usage.prompt_tokens.toLocaleString("hu-HU")} token</dd>
+                  </div>
+                  <div>
+                    <dt>Kimenet</dt>
+                    <dd>{result.token_usage.response_tokens.toLocaleString("hu-HU")} token</dd>
+                  </div>
+                  <div>
+                    <dt>Összesen</dt>
+                    <dd>{result.token_usage.total_tokens.toLocaleString("hu-HU")} token</dd>
+                  </div>
+                  {result.token_usage.cached_tokens > 0 && (
+                    <div>
+                      <dt>Cache</dt>
+                      <dd>{result.token_usage.cached_tokens.toLocaleString("hu-HU")} token</dd>
+                    </div>
+                  )}
+                  {result.token_usage.thoughts_tokens > 0 && (
+                    <div>
+                      <dt>Gondolkodás</dt>
+                      <dd>{result.token_usage.thoughts_tokens.toLocaleString("hu-HU")} token</dd>
+                    </div>
+                  )}
+                </dl>
+              </article>
+            )}
+
             <article className="result-card">
               <h2>Összefoglaló</h2>
               <p>{result.summary}</p>

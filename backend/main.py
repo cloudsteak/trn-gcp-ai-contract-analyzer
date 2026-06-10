@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
-GCP_REGION = os.getenv("GCP_REGION", "europe-west1")
+GEMINI_LOCATION = os.getenv("GEMINI_LOCATION", "global")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 PORT = int(os.getenv("PORT", "8080"))
 
@@ -27,7 +28,14 @@ ANALYSIS_PROMPT = (
     '- "key_clauses": objektumok listája, mindegyik "title" (cím) és '
     '"description" (rövid leírás) mezőkkel\n'
     '- "risk_flags": objektumok listája, mindegyik "quote" (pontos idézet '
-    'a szerződésből) és "explanation" (magyarázat) mezőkkel\n\n'
+    'a szerződésből) és "explanation" (magyarázat) mezőkkel\n'
+    '- "contract_quality": objektum a szerződés általános megfelelőségére:\n'
+    '  - "score": egész szám 1 és 10 között (10 = kiegyensúlyozott, korrekt, '
+    "átlátható; 1 = súlyosan kockázatos vagy hiányos)\n"
+    '  - "level": "green" (7-10), "yellow" (4-6) vagy "red" (1-3)\n'
+    '  - "label": rövid magyar minősítés (pl. "Korrekt", "Figyelmet igényel", '
+    '"Kockázatos")\n'
+    '  - "explanation": 1-2 mondatos indoklás magyarul\n\n'
     "Csak érvényes JSON-t adj vissza. Minden szöveges tartalom legyen magyar nyelvű. "
     "Az idézetek maradhatnak az eredeti szerződés szövegében."
 )
@@ -45,10 +53,30 @@ class RiskFlag(BaseModel):
     explanation: str
 
 
+class ContractQuality(BaseModel):
+    score: int = Field(..., ge=1, le=10)
+    level: Literal["green", "yellow", "red"]
+    label: str = Field(..., max_length=100)
+    explanation: str = Field(..., max_length=1000)
+
+
 class AnalysisResult(BaseModel):
+    contract_quality: ContractQuality
     summary: str = Field(..., max_length=4000)
     key_clauses: list[KeyClause]
     risk_flags: list[RiskFlag]
+
+
+class TokenUsage(BaseModel):
+    prompt_tokens: int = 0
+    response_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int | None = None
+    thoughts_tokens: int | None = None
+
+
+class AnalyzeResponse(AnalysisResult):
+    token_usage: TokenUsage
 
 
 def _parse_cors_origins(raw: str) -> list[str]:
@@ -62,10 +90,11 @@ def _build_genai_client() -> genai.Client:
     if not GCP_PROJECT_ID:
         raise RuntimeError("A GCP_PROJECT_ID környezeti változó kötelező")
 
+    # gemini-3.1-flash-lite global endpointot hasznal, nem regionalist
     return genai.Client(
         vertexai=True,
         project=GCP_PROJECT_ID,
-        location=GCP_REGION,
+        location=GEMINI_LOCATION,
     )
 
 
@@ -78,6 +107,25 @@ def _parse_analysis_response(raw_text: str) -> AnalysisResult:
     return AnalysisResult.model_validate(payload)
 
 
+def _extract_token_usage(response: types.GenerateContentResponse) -> TokenUsage:
+    usage = response.usage_metadata
+    if usage is None:
+        return TokenUsage()
+
+    # Az SDK candidates_token_count mezot ad vissza, nem response_token_count-et
+    response_tokens = getattr(usage, "candidates_token_count", None) or getattr(
+        usage, "response_token_count", None
+    ) or 0
+
+    return TokenUsage(
+        prompt_tokens=usage.prompt_token_count or 0,
+        response_tokens=response_tokens,
+        total_tokens=usage.total_token_count or 0,
+        cached_tokens=usage.cached_content_token_count,
+        thoughts_tokens=usage.thoughts_token_count,
+    )
+
+
 def _get_genai_client() -> genai.Client:
     global genai_client
     if genai_client is None:
@@ -85,7 +133,7 @@ def _get_genai_client() -> genai.Client:
     return genai_client
 
 
-async def _analyze_pdf(pdf_bytes: bytes) -> AnalysisResult:
+async def _analyze_pdf(pdf_bytes: bytes) -> AnalyzeResponse:
     # A PDF-et nativan adjuk at a Gemini API-nak, szoveg konverzio nelkul
     client = _get_genai_client()
 
@@ -104,7 +152,11 @@ async def _analyze_pdf(pdf_bytes: bytes) -> AnalysisResult:
     if not response.text:
         raise ValueError("A Gemini üres választ adott vissza")
 
-    return _parse_analysis_response(response.text)
+    analysis = _parse_analysis_response(response.text)
+    return AnalyzeResponse(
+        **analysis.model_dump(),
+        token_usage=_extract_token_usage(response),
+    )
 
 
 @asynccontextmanager
@@ -128,8 +180,8 @@ async def health() -> dict[str, str]:
     return {"status": "rendben"}
 
 
-@app.post("/analyze", response_model=AnalysisResult)
-async def analyze(file: UploadFile = File(...)) -> AnalysisResult:
+@app.post("/analyze", response_model=AnalyzeResponse)
+async def analyze(file: UploadFile = File(...)) -> AnalyzeResponse:
     if file.content_type not in ("application/pdf", "application/x-pdf"):
         raise HTTPException(status_code=400, detail="Csak PDF fájl támogatott")
 
