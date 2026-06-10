@@ -215,9 +215,10 @@ flowchart LR
     end
 
     subgraph GCP["☁️ GCP production – egyszeri + automatikus"]
-        S1["① setup.sh<br/>infrastruktúra"] --> S2["② GitHub Secrets"]
-        S2 --> S3["③ push → main"]
-        S3 --> S4["deploy.yml<br/>Cloud Run deploy"]
+        S1["① setup.sh<br/>infrastruktúra"] --> S2["② setup-wif.sh<br/>GitHub WIF"]
+        S2 --> S3["③ GitHub Secrets"]
+        S3 --> S4["④ push → main"]
+        S4 --> S5["deploy.yml"]
     end
 
     Local -.->|"kód kész, PR merge"| GCP
@@ -233,6 +234,7 @@ flowchart LR
 | Lépés | Eszköz | Mit telepít? | Gyakoriság |
 |-------|--------|--------------|------------|
 | Infrastruktúra (API-k, SA, üres Cloud Run service) | `scripts/setup.sh` | GCP erőforrások – **nem** az alkalmazás kódját | Egyszer, projekt elején |
+| GitHub Actions WIF (pool, provider, CI/CD SA) | `scripts/setup-wif.sh` | Kulcs nélküli CI hitelesítés | Egyszer, `setup.sh` után |
 | Alkalmazás kód (backend + frontend) | **GitHub Actions** `deploy.yml` | Forráskód → Cloud Run (source deploy) | Minden `main` push |
 | Lint ellenőrzés | GitHub Actions `lint.yml` | Kódminőség PR-en | Minden pull request |
 | Manuális `gcloud run deploy` | *(lásd lent)* | Ugyanaz, amit a CI is csinál | **Csak kivételes esetben** |
@@ -352,9 +354,10 @@ cd frontend && npm install && npm run lint && npm run build
 
 ```
 ① setup.sh          →  GCP infrastruktúra (egyszer)
-② GitHub Secrets    →  CI hitelesítés
-③ git push main     →  alkalmazás deploy (automatikus, deploy.yml)
-④ tesztelés         →  Cloud Run URL-eken
+② setup-wif.sh      →  GitHub Actions WIF (egyszer, JSON kulcs nélkül)
+③ GitHub Secrets    →  WIF provider + service account azonosítók
+④ git push main     →  alkalmazás deploy (automatikus, deploy.yml)
+⑤ tesztelés         →  Cloud Run URL-eken
 ```
 
 ---
@@ -381,14 +384,46 @@ A script:
 
 ---
 
-### ② GitHub Secrets (CI deploy-hoz)
+### ② GitHub Actions hitelesítés – WIF (JSON kulcs nélkül)
 
-**Miért?** A `deploy.yml` workflow-nak GCP hozzáférés kell a Cloud Run deploy-hoz – ezt Secrets-ből kapja, nem a repóból.
+**Miért WIF?** Sok GCP szervezetben tiltott a service account JSON kulcs letöltése. A **Workload Identity Federation** (WIF) lehetővé teszi, hogy a GitHub Actions OIDC tokennel, kulcs nélkül hitelesüljön.
 
-| Secret | Miért kell? |
-|--------|-------------|
-| `GCP_PROJECT_ID` | Melyik GCP projektbe deployoljon |
-| `GCP_SA_KEY` | Service account JSON kulcs Cloud Run és Cloud Build jogosultságokkal |
+**Miért külön script?** A WIF pool, provider és CI/CD jogosultságok egyszeri infrastruktúra – a `setup.sh` után futtasd.
+
+```bash
+export GCP_PROJECT_ID=<a-gcp-projekt-id>
+export GITHUB_REPO=<szervezet>/<repo-nev>   # pl. cloudsteak/trn-gcp-ai-contract-analyzer
+./scripts/setup-wif.sh
+```
+
+> **Fontos:** Futtasd **a `setup.sh` után**, mert a CI/CD accountnak szüksége van a futó `contract-analyzer-sa` service account használatára deploy-kor.
+
+A script:
+
+1. Létrehozza a `contract-analyzer-cicd-sa` service accountot (csak deploy-hoz, nem futtatja az appot)
+2. Deploy jogosultságokat ad (Cloud Run, Cloud Build, Artifact Registry, Storage)
+3. Workload Identity Pool + GitHub OIDC providert hoz létre
+4. A megadott `GITHUB_REPO`-hoz köti a hozzáférést (más repo nem deployolhat)
+5. Kiírja a GitHub Secrets értékeit
+
+#### GitHub Secrets
+
+A script végén megjelenő értékeket másold be: **Settings → Secrets and variables → Actions**
+
+| Secret | Miért kell? | Példa |
+|--------|-------------|-------|
+| `GCP_PROJECT_ID` | GCP projekt azonosító | `my-project-123` |
+| `GCP_WIF_PROVIDER` | WIF provider teljes resource neve | `projects/123456789/locations/global/workloadIdentityPools/contract-analyzer-pool/providers/github-provider` |
+| `GCP_WIF_SERVICE_ACCOUNT` | CI/CD service account e-mail | `contract-analyzer-cicd-sa@my-project-123.iam.gserviceaccount.com` |
+
+**Nincs szükség `GCP_SA_KEY`-re** – JSON kulcsot nem használunk.
+
+#### Két service account – mi micsoda?
+
+| Service account | Szerep | Hol fut? |
+|-----------------|--------|----------|
+| `contract-analyzer-sa` | App futtatás, Gemini hívás (ADC) | Cloud Run service-ek |
+| `contract-analyzer-cicd-sa` | Deploy (source → Cloud Run) | Csak GitHub Actions WIF-en keresztül |
 
 A Secrets beállítása után **minden `main` push automatikusan deployol**:
 
@@ -447,13 +482,15 @@ curl -X POST "${BACKEND_URL}/analyze" \
 
 ---
 
-### ⑤ Erőforrások törlése – `teardown.sh`
+### ⑤ Erőforrások törlése
 
 **Miért?** Fejlesztés vagy demo után ne maradjanak felesleges Cloud Run service-ek és IAM kötések – költség és biztonság.
 
 ```bash
 export GCP_PROJECT_ID=<a-gcp-projekt-id>
+export GITHUB_REPO=<szervezet>/<repo-nev>   # teardown-wif.sh-hoz
 ./scripts/teardown.sh
+./scripts/teardown-wif.sh
 ```
 
 ---
@@ -508,8 +545,8 @@ gcloud run deploy contract-analyzer-frontend \
 | Backend lint | ✅ | Független a GCP-től – csak uv kell |
 | `/health` helyben | ✅ | Nem hív Gemini-t, csak az API elérhetőségét jelzi |
 | `/analyze` helyben | ⚠️ GCP kell | Gemini hívás ADC-vel – ugyanaz, mint Cloud Run-on |
-| GCP infrastruktúra | ⚠️ Egyszer kézzel | `setup.sh` – a CI ezt nem csinálja meg helyetted |
-| GCP alkalmazás deploy | ⚠️ CI-vel | `git push main` → `deploy.yml` – **ez az alapértelmezett út** |
+| GCP infrastruktúra | ⚠️ Egyszer kézzel | `setup.sh` + `setup-wif.sh` – a CI ezt nem csinálja meg helyetted |
+| GCP alkalmazás deploy | ⚠️ CI-vel | `git push main` → `deploy.yml` (WIF, JSON kulcs nélkül) |
 
 A teljes end-to-end elemzés **működő GCP környezetben** fut le: a backend a Gemini Enterprise Agent Platformon hívja a modellt ADC-vel, a PDF-et natívan adja át, és magyar nyelvű JSON-t vár vissza.
 
@@ -521,7 +558,7 @@ A teljes end-to-end elemzés **működő GCP környezetben** fut le: a backend a
 trn-gcp-ai-contract-analyzer/
 ├── backend/           # FastAPI backend (main.py, dev.sh, pyproject.toml)
 ├── frontend/          # React + Vite UI
-├── scripts/           # setup.sh, teardown.sh
+├── scripts/           # setup.sh, setup-wif.sh, teardown.sh, teardown-wif.sh
 ├── .github/workflows/ # lint.yml, deploy.yml
 └── CLAUDE.md          # Fejlesztési specifikáció
 ```
