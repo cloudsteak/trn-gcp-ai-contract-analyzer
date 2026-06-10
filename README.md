@@ -90,7 +90,7 @@ A [Google AI Studio](https://aistudio.google.com) fejlesztői felületen ugyanaz
 
 1. Nyisd meg: [https://aistudio.google.com](https://aistudio.google.com)
 2. Hozz létre egy **Playground** / **Chat** promptot.
-3. Válassz modellt (pl. `gemini-2.5-flash` vagy elérhető Gemini 3 verzió).
+3. Válassz modellt (pl. `gemini-3.1-flash-lite` vagy elérhető Gemini 3 verzió).
 4. Csatold a PDF szerződést (Upload file, vagy Drive integráció ha elérhető).
 5. Illeszd be a [2. szekció promptját](#elemzési-prompt).
 6. Futtasd, és értékeld a választ.
