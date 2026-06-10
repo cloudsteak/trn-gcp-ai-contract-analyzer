@@ -6,6 +6,28 @@ PDF szerződések elemzése a Gemini API (Gemini Enterprise Agent Platform) seg�
 
 ## Architektúra
 
+### Magas szintű áttekintés
+
+```mermaid
+flowchart TB
+    User(["Felhasználó"])
+    FE["Frontend"]
+    BE["Backend"]
+
+    subgraph GCP["Google Cloud Platform"]
+        Gemini["Gemini modell"]
+    end
+
+    User -->|"PDF feltöltés"| FE
+    FE -->|"elemzés kérése"| BE
+    BE -->|"PDF + prompt"| Gemini
+    Gemini -->|"elemzés eredménye"| BE
+    BE -->|"strukturált válasz"| FE
+    FE -->|"megjelenítés"| User
+```
+
+### Részletes architektúra
+
 ```mermaid
 flowchart TB
     subgraph L1["① Felhasználói réteg"]
