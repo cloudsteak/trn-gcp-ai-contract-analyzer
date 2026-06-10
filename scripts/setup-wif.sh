@@ -26,7 +26,13 @@ gcloud config set project "${PROJECT_ID}"
 PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
 
 echo "Szukseges API-k engedelyezese WIF-hez..."
-gcloud services enable iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com cloudresourcemanager.googleapis.com
+gcloud services enable \
+  iam.googleapis.com \
+  iamcredentials.googleapis.com \
+  sts.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com
 
 echo "CI/CD service account letrehozasa: ${CICD_SA}"
 if gcloud iam service-accounts describe "${CICD_SA_EMAIL}" >/dev/null 2>&1; then
@@ -36,18 +42,53 @@ else
     --display-name="Contract Analyzer GitHub Actions Deploy"
 fi
 
+COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+CLOUDBUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+
 echo "Deploy jogosultsagok hozzarendelese a CI/CD service accounthoz..."
 for role in \
-  roles/run.admin \
-  roles/cloudbuild.builds.editor \
-  roles/artifactregistry.admin \
-  roles/storage.admin \
+  roles/run.sourceDeveloper \
+  roles/run.builder \
+  roles/cloudbuild.builds.builder \
+  roles/artifactregistry.writer \
+  roles/storage.objectAdmin \
+  roles/logging.logWriter \
   roles/serviceusage.serviceUsageConsumer; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${CICD_SA_EMAIL}" \
     --role="${role}" \
     --condition=None
 done
+
+echo "CI/CD service account onmagat hasznalhatja build service accountkent..."
+gcloud iam service-accounts add-iam-policy-binding "${CICD_SA_EMAIL}" \
+  --role="roles/iam.serviceAccountUser" \
+  --member="serviceAccount:${CICD_SA_EMAIL}" \
+  --condition=None
+
+echo "CI/CD service account hasznalhatja az alap Cloud Build / Compute accountokat..."
+for BUILD_SA in "${CLOUDBUILD_SA}" "${COMPUTE_SA}"; do
+  if gcloud iam service-accounts describe "${BUILD_SA}" >/dev/null 2>&1; then
+    gcloud iam service-accounts add-iam-policy-binding "${BUILD_SA}" \
+      --role="roles/iam.serviceAccountUser" \
+      --member="serviceAccount:${CICD_SA_EMAIL}" \
+      --condition=None
+  fi
+done
+
+echo "Cloud Build service account deployolhat a futo Cloud Run service accounttal..."
+if gcloud iam service-accounts describe "${CLOUDBUILD_SA}" >/dev/null 2>&1; then
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${CLOUDBUILD_SA}" \
+    --role="roles/run.builder" \
+    --condition=None
+  gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA_EMAIL}" \
+    --role="roles/iam.serviceAccountUser" \
+    --member="serviceAccount:${CLOUDBUILD_SA}" \
+    --condition=None 2>/dev/null || {
+    echo "Figyelem: a ${RUNTIME_SA} meg nem letezik. Futtasd elobb a setup.sh-t, majd ujra ezt a scriptet."
+  }
+fi
 
 echo "Jogosultsag a futo Cloud Run service account hasznalatahoz..."
 gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA_EMAIL}" \

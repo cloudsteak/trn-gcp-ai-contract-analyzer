@@ -401,7 +401,7 @@ export GITHUB_REPO=<szervezet>/<repo-nev>   # pl. cloudsteak/trn-gcp-ai-contract
 A script:
 
 1. Létrehozza a `contract-analyzer-cicd-sa` service accountot (csak deploy-hoz, nem futtatja az appot)
-2. Deploy jogosultságokat ad (Cloud Run, Cloud Build, Artifact Registry, Storage)
+2. Deploy jogosultságokat ad (Cloud Run source deploy, Cloud Build, Artifact Registry)
 3. Workload Identity Pool + GitHub OIDC providert hoz létre
 4. A megadott `GITHUB_REPO`-hoz köti a hozzáférést (más repo nem deployolhat)
 5. Kiírja a GitHub Secrets értékeit
@@ -431,6 +431,18 @@ A Secrets beállítása után **minden `main` push automatikusan deployol**:
 2. `deploy.yml` → frontend source deploy (a backend URL-jével build időben)
 
 **Nincs szükség kézi `gcloud run deploy`-ra a normál munkafolyamatban.**
+
+#### Deploy hiba: `PERMISSION_DENIED` / `does not have permission to act as service account`
+
+Ha a GitHub Actions deploy Cloud Build jogosultság miatt bukik, futtasd **újra** a WIF scriptet (frissíti az IAM-ot), majd push-old a friss `deploy.yml`-t:
+
+```bash
+export GCP_PROJECT_ID=<a-gcp-projekt-id>
+export GITHUB_REPO=<szervezet>/<repo-nev>
+./scripts/setup-wif.sh
+```
+
+A deploy most explicit `--build-service-account`-ot használ (a CI/CD SA-t), és `--quiet` flaggel fut – interaktív megerősítés nélkül.
 
 ---
 
