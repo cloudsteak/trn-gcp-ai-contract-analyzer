@@ -33,15 +33,19 @@ jobs:
       - name: Deploy backend to Cloud Run
         working-directory: backend
         env:
-          SERVICE_ACCOUNT: contract-analyzer-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          CICD_SA: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+          RUNTIME_SA: contract-analyzer-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
         run: |
           gcloud run deploy "${BACKEND_SERVICE}" \
             --source . \
             --region "${GCP_REGION}" \
             --platform managed \
             --allow-unauthenticated \
-            --service-account "${SERVICE_ACCOUNT}" \
-            --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},GEMINI_LOCATION=global,CORS_ORIGINS=*"
+            --quiet \
+            --service-account "${RUNTIME_SA}" \
+            --build-service-account "projects/${PROJECT_ID}/serviceAccounts/${CICD_SA}" \
+            --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
 
   deploy-frontend:
     runs-on: ubuntu-latest
@@ -74,12 +78,16 @@ jobs:
       - name: Deploy frontend to Cloud Run
         working-directory: frontend
         env:
-          SERVICE_ACCOUNT: contract-analyzer-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          CICD_SA: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+          RUNTIME_SA: contract-analyzer-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
         run: |
           gcloud run deploy "${FRONTEND_SERVICE}" \
             --source . \
             --region "${GCP_REGION}" \
             --platform managed \
             --allow-unauthenticated \
-            --service-account "${SERVICE_ACCOUNT}" \
+            --quiet \
+            --service-account "${RUNTIME_SA}" \
+            --build-service-account "projects/${PROJECT_ID}/serviceAccounts/${CICD_SA}" \
             --set-build-env-vars="VITE_API_URL=${{ steps.backend.outputs.url }}"

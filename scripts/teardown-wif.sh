@@ -40,10 +40,12 @@ gcloud iam workload-identity-pools delete "${POOL_ID}" \
 
 echo "CI/CD service account IAM koteseinek torlese..."
 for role in \
-  roles/run.admin \
-  roles/cloudbuild.builds.editor \
-  roles/artifactregistry.admin \
-  roles/storage.admin \
+  roles/run.sourceDeveloper \
+  roles/run.builder \
+  roles/cloudbuild.builds.builder \
+  roles/artifactregistry.writer \
+  roles/storage.objectAdmin \
+  roles/logging.logWriter \
   roles/serviceusage.serviceUsageConsumer; do
   gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${CICD_SA_EMAIL}" \
