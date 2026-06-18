@@ -228,3 +228,4 @@ frontend/.env.*.local
 
 # Vite cache
 frontend/.vite/
+.DS_Store
