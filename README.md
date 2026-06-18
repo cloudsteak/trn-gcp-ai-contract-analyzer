@@ -85,7 +85,50 @@ A GitHub Actions automatikusan deployol – pár perc múlva él az alkalmazás.
 1. Nyisd meg a frontend weboldalt a böngészőben. Az URL-t a `setup.sh` a végén kiírja, vagy a GCP Console → **Cloud Run** → `contract-analyzer-frontend` → **URL**.
 2. Tölts fel egy szerződés PDF-et, indítsd el az elemzést, és nézd meg az eredményt.
 
-### 9. Erőforrások törlése (demo újraindítás)
+### 9. Opcionális: RAG bekapcsolása
+
+A RAG modul alapértelmezetten **ki van kapcsolva** – az alkalmazás a fenti tesztelés után is sima PDF-elemzést végez. Ha a szerződéseket belső céges szabályzatokkal is össze akarod vetni:
+
+**1. Szabályzat fájlok**
+
+Helyezd a belső szabályzatokat (`.md` vagy `.txt`) a `backend/policies/` mappába. A repóban két példa van: `fizetesi-feltetelek.md`, `adatvedelem.md` – cseréld le vagy egészítsd ki a saját szabályzataiddal.
+
+**2. Deploy a szabályzatokkal**
+
+Commitold a fájlokat, nyiss PR-t, és merge-eld a `main` branchre – a GitHub Actions source deploy a szabályzatokat is a backend image-be csomagolja.
+
+**3. Környezeti változók a Cloud Run backenden**
+
+```bash
+gcloud run services update "${BACKEND_SERVICE}" \
+  --region "${GCP_REGION}" \
+  --update-env-vars="RAG_ENABLED=true,RAG_POLICY_DIR=policies,RAG_MAX_POLICY_CHARS=30000"
+```
+
+| Változó | Jelentés |
+|---------|----------|
+| `RAG_ENABLED` | `true` – a RAG modul elérhető |
+| `RAG_POLICY_DIR` | Szabályzat mappa neve a `backend/` alatt |
+| `RAG_MAX_POLICY_CHARS` | Max. karakter a promptba injektált szabályzatból |
+
+**4. Ellenőrzés**
+
+```bash
+BACKEND_URL=$(gcloud run services describe "${BACKEND_SERVICE}" \
+  --region "${GCP_REGION}" --format='value(status.url)')
+curl "${BACKEND_URL}/rag/status"
+# Várható: "enabled": true, "available": true, "policy_count" > 0
+```
+
+**5. Használat a felületen**
+
+Ha a RAG elérhető, a frontenden megjelenik a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzet. Jelöld be elemzés előtt – az eredmény tartalmazza a megszokott mezőket **plusz** a `policy_findings` listát (szabályzati megfelelés / figyelmeztetés / sértés).
+
+> **Fontos:** A GitHub Actions deploy (`deploy.yml`) minden `main` push-nál `--set-env-vars`-sal írja felül a backend környezeti változóit **RAG nélkül**. Tartós bekapcsoláshoz add hozzá a `RAG_ENABLED=true,RAG_POLICY_DIR=policies` értékeket a `.github/workflows/deploy.yml` fájl backend deploy lépéséhez is, vagy futtasd újra a fenti `gcloud run services update` parancsot minden deploy után.
+
+Részletes leírás: [5. szekció – Opcionális RAG modul](#5-opcionális-rag-modul--belső-szabályzatokkal-összevetés).
+
+### 10. Erőforrások törlése (demo újraindítás)
 
 ```bash
 ./scripts/teardown.sh
