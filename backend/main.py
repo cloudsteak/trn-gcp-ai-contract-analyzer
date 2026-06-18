@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 
 from rag import build_policy_context, build_rag_prompt, get_rag_status, is_rag_available
 
-
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -44,7 +43,6 @@ ANALYSIS_PROMPT = (
 )
 
 genai_client: genai.Client | None = None  # Gemini kliens eletciklus alatt inicializalva
-
 
 class KeyClause(BaseModel):
     title: str
