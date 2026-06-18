@@ -62,3 +62,115 @@ add_sa_iam_binding() {
     --role="${role}" \
     --condition=None
 }
+
+wif_pool_state() {
+  local project_id="$1"
+  local pool_id="$2"
+  gcloud iam workload-identity-pools describe "${pool_id}" \
+    --project="${project_id}" \
+    --location=global \
+    --format='value(state)' 2>/dev/null || echo ""
+}
+
+wait_for_wif_pool_active() {
+  local project_id="$1"
+  local pool_id="$2"
+  local max_attempts="${3:-30}"
+  local attempt=1
+  local state=""
+
+  while (( attempt <= max_attempts )); do
+    state="$(wif_pool_state "${project_id}" "${pool_id}")"
+    if [[ "${state}" == "ACTIVE" ]]; then
+      echo "WIF pool aktiv: ${pool_id}"
+      return 0
+    fi
+    echo "Varakozas WIF pool aktiv allapotra (${attempt}/${max_attempts}): ${pool_id} (allapot: ${state:-ismeretlen})"
+    sleep 2
+    ((attempt++)) || true
+  done
+
+  echo "Hiba: WIF pool nem lett aktiv idoben: ${pool_id}" >&2
+  return 1
+}
+
+# teardown utan a pool soft-delete allapotban maradhat – describe sikeres, de provider letrehozas NOT_FOUND
+ensure_wif_pool() {
+  local project_id="$1"
+  local pool_id="$2"
+  local display_name="$3"
+  local state=""
+
+  state="$(wif_pool_state "${project_id}" "${pool_id}")"
+  case "${state}" in
+    ACTIVE)
+      echo "A WIF pool mar letezik es aktiv, kihagyva: ${pool_id}"
+      ;;
+    DELETED)
+      echo "A WIF pool torolt allapotban van (soft-delete), visszaallitas: ${pool_id}"
+      gcloud iam workload-identity-pools undelete "${pool_id}" \
+        --project="${project_id}" \
+        --location=global
+      wait_for_wif_pool_active "${project_id}" "${pool_id}"
+      ;;
+    "")
+      echo "WIF pool letrehozasa: ${pool_id}"
+      gcloud iam workload-identity-pools create "${pool_id}" \
+        --project="${project_id}" \
+        --location=global \
+        --display-name="${display_name}"
+      wait_for_wif_pool_active "${project_id}" "${pool_id}"
+      ;;
+    *)
+      echo "Figyelem: WIF pool ismeretlen allapot (${state}), varakozas aktivra: ${pool_id}"
+      wait_for_wif_pool_active "${project_id}" "${pool_id}"
+      ;;
+  esac
+}
+
+wif_provider_state() {
+  local project_id="$1"
+  local pool_id="$2"
+  local provider_id="$3"
+  gcloud iam workload-identity-pools providers describe "${provider_id}" \
+    --project="${project_id}" \
+    --location=global \
+    --workload-identity-pool="${pool_id}" \
+    --format='value(state)' 2>/dev/null || echo ""
+}
+
+ensure_wif_oidc_provider() {
+  local project_id="$1"
+  local pool_id="$2"
+  local provider_id="$3"
+  local github_repo="$4"
+  local state=""
+
+  state="$(wif_provider_state "${project_id}" "${pool_id}" "${provider_id}")"
+  case "${state}" in
+    ACTIVE)
+      echo "A WIF provider mar letezik es aktiv, kihagyva: ${provider_id}"
+      ;;
+    DELETED)
+      echo "A WIF provider torolt allapotban van (soft-delete), visszaallitas: ${provider_id}"
+      gcloud iam workload-identity-pools providers undelete "${provider_id}" \
+        --project="${project_id}" \
+        --location=global \
+        --workload-identity-pool="${pool_id}"
+      ;;
+    "")
+      echo "GitHub OIDC provider letrehozasa: ${provider_id}"
+      retry_gcloud 12 gcloud iam workload-identity-pools providers create-oidc "${provider_id}" \
+        --project="${project_id}" \
+        --location=global \
+        --workload-identity-pool="${pool_id}" \
+        --display-name="GitHub Actions" \
+        --issuer-uri="https://token.actions.githubusercontent.com" \
+        --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
+        --attribute-condition="assertion.repository == '${github_repo}'"
+      ;;
+    *)
+      echo "Figyelem: WIF provider ismeretlen allapot (${state}): ${provider_id}"
+      ;;
+  esac
+}

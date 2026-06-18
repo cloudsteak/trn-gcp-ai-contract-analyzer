@@ -90,30 +90,8 @@ else
   echo "Figyelem: a ${RUNTIME_SA} meg nem letezik. Futtasd elobb a setup.sh-t, majd ujra ezt a scriptet."
 fi
 
-echo "Workload Identity Pool letrehozasa: ${POOL_ID}"
-if gcloud iam workload-identity-pools describe "${POOL_ID}" \
-  --location=global >/dev/null 2>&1; then
-  echo "A WIF pool mar letezik, kihagyva."
-else
-  gcloud iam workload-identity-pools create "${POOL_ID}" \
-    --location=global \
-    --display-name="Contract Analyzer GitHub Actions"
-fi
-
-echo "GitHub OIDC provider letrehozasa: ${PROVIDER_ID}"
-if gcloud iam workload-identity-pools providers describe "${PROVIDER_ID}" \
-  --location=global \
-  --workload-identity-pool="${POOL_ID}" >/dev/null 2>&1; then
-  echo "A WIF provider mar letezik, kihagyva."
-else
-  gcloud iam workload-identity-pools providers create-oidc "${PROVIDER_ID}" \
-    --location=global \
-    --workload-identity-pool="${POOL_ID}" \
-    --display-name="GitHub Actions" \
-    --issuer-uri="https://token.actions.githubusercontent.com" \
-    --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
-    --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
-fi
+ensure_wif_pool "${PROJECT_ID}" "${POOL_ID}" "Contract Analyzer GitHub Actions"
+ensure_wif_oidc_provider "${PROJECT_ID}" "${POOL_ID}" "${PROVIDER_ID}" "${GITHUB_REPO}"
 
 WIF_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 PRINCIPAL="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GITHUB_REPO}"

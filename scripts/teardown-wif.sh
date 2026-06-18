@@ -37,6 +37,7 @@ echo "WIF pool torlese..."
 gcloud iam workload-identity-pools delete "${POOL_ID}" \
   --location=global \
   --quiet 2>/dev/null || echo "A pool nem letezik, kihagyva."
+echo "Megjegyzes: a WIF pool/provider 30 napig soft-delete allapotban marad; a setup-wif.sh automatikusan visszaallitja."
 
 echo "CI/CD service account IAM koteseinek torlese..."
 for role in \
