@@ -67,7 +67,7 @@ echo "Backend kornyezeti valtozok beallitasa..."
 gcloud run services update "${BACKEND_SERVICE}" \
   --region="${REGION}" \
   --service-account="${SA_EMAIL}" \
-  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
+  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*,RAG_ENABLED=true,RAG_POLICY_DIR=policies,RAG_MAX_POLICY_CHARS=30000"
 
 echo "Frontend kornyezeti valtozok beallitasa..."
 BACKEND_URL="$(gcloud run services describe "${BACKEND_SERVICE}" --region="${REGION}" --format='value(status.url)')"

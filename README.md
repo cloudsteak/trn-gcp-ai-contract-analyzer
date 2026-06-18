@@ -11,7 +11,7 @@ PDF szerződések elemzése a Gemini API (Gemini Enterprise Agent Platform) seg�
 3. [Szerződés elemzés Gemini-vel](#2-szerződés-elemzés-gemini-vel)
 4. [Szerződés elemzés Gemini AI Studioval](#3-szerződés-elemzés-gemini-ai-studioval)
 5. [Szerződés elemzés skálázható felhő alapú megoldással](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással)
-6. [Opcionális RAG modul – belső szabályzatokkal összevetés](#5-opcionális-rag-modul--belső-szabályzatokkal-összevetés)
+6. [RAG modul – belső szabályzatokkal összevetés](#5-rag-modul--belső-szabályzatokkal-összevetés)
 
 ---
 
@@ -85,9 +85,9 @@ A GitHub Actions automatikusan deployol – pár perc múlva él az alkalmazás.
 1. Nyisd meg a frontend weboldalt a böngészőben. Az URL-t a `setup.sh` a végén kiírja, vagy a GCP Console → **Cloud Run** → `contract-analyzer-frontend` → **URL**.
 2. Tölts fel egy szerződés PDF-et, indítsd el az elemzést, és nézd meg az eredményt.
 
-### 9. Opcionális: RAG bekapcsolása
+### 9. RAG – belső szabályzatokkal összevetés
 
-A RAG modul alapértelmezetten **ki van kapcsolva** – az alkalmazás a fenti tesztelés után is sima PDF-elemzést végez. Ha a szerződéseket belső céges szabályzatokkal is össze akarod vetni:
+A RAG modul alapértelmezetten **be van kapcsolva** – a `setup.sh`, a GitHub Actions deploy és a helyi `.env.example` is `RAG_ENABLED=true` értéket állít. A szerződéseket belső céges szabályzatokkal is össze tudod vetni.
 
 **1. Szabályzat fájlok**
 
@@ -97,21 +97,7 @@ Helyezd a belső szabályzatokat (`.md` vagy `.txt`) a `backend/policies/` mapp�
 
 Commitold a fájlokat, nyiss PR-t, és merge-eld a `main` branchre – a GitHub Actions source deploy a szabályzatokat is a backend image-be csomagolja.
 
-**3. Környezeti változók a Cloud Run backenden**
-
-```bash
-gcloud run services update "${BACKEND_SERVICE}" \
-  --region "${GCP_REGION}" \
-  --update-env-vars="RAG_ENABLED=true,RAG_POLICY_DIR=policies,RAG_MAX_POLICY_CHARS=30000"
-```
-
-| Változó | Jelentés |
-|---------|----------|
-| `RAG_ENABLED` | `true` – a RAG modul elérhető |
-| `RAG_POLICY_DIR` | Szabályzat mappa neve a `backend/` alatt |
-| `RAG_MAX_POLICY_CHARS` | Max. karakter a promptba injektált szabályzatból |
-
-**4. Ellenőrzés**
+**3. Ellenőrzés**
 
 ```bash
 BACKEND_URL=$(gcloud run services describe "${BACKEND_SERVICE}" \
@@ -120,13 +106,27 @@ curl "${BACKEND_URL}/rag/status"
 # Várható: "enabled": true, "available": true, "policy_count" > 0
 ```
 
-**5. Használat a felületen**
+**4. Használat a felületen**
 
-Ha a RAG elérhető, a frontenden megjelenik a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzet. Jelöld be elemzés előtt – az eredmény tartalmazza a megszokott mezőket **plusz** a `policy_findings` listát (szabályzati megfelelés / figyelmeztetés / sértés).
+Ha a RAG elérhető, a frontenden megjelenik a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzet. Jelöld be elemzés előtt – az eredmény tartalmazza a megszokott mezőket **plusz** a `policy_findings` listát (szabályzati megfelelés / figyelmeztetés / sértés). A jelölőnégyzet nélkül sima PDF-elemzés fut.
 
-> **Fontos:** A GitHub Actions deploy (`deploy.yml`) minden `main` push-nál `--set-env-vars`-sal írja felül a backend környezeti változóit **RAG nélkül**. Tartós bekapcsoláshoz add hozzá a `RAG_ENABLED=true,RAG_POLICY_DIR=policies` értékeket a `.github/workflows/deploy.yml` fájl backend deploy lépéséhez is, vagy futtasd újra a fenti `gcloud run services update` parancsot minden deploy után.
+**5. Kikapcsolás (opcionális)**
 
-Részletes leírás: [5. szekció – Opcionális RAG modul](#5-opcionális-rag-modul--belső-szabályzatokkal-összevetés).
+Ha nem akarod használni a belső szabályzatok összevetését:
+
+```bash
+gcloud run services update "${BACKEND_SERVICE}" \
+  --region "${GCP_REGION}" \
+  --update-env-vars="RAG_ENABLED=false"
+```
+
+| Változó | Alapértelmezés | Jelentés |
+|---------|----------------|----------|
+| `RAG_ENABLED` | `true` | RAG modul elérhető-e a backenden |
+| `RAG_POLICY_DIR` | `policies` | Szabályzat mappa neve a `backend/` alatt |
+| `RAG_MAX_POLICY_CHARS` | `30000` | Max. karakter a promptba injektált szabályzatból |
+
+Részletes leírás: [5. szekció – RAG modul](#5-rag-modul--belső-szabályzatokkal-összevetés).
 
 ### 10. Erőforrások törlése (demo újraindítás)
 
@@ -140,16 +140,16 @@ Részletes leírás: [5. szekció – Opcionális RAG modul](#5-opcionális-rag-
 
 ## 1. Általános ismerető
 
-Ez a projekt **három alap módon** mutatja be ugyanazt a szerződés-elemzési feladatot (opcionálisan kiegészíthető RAG-gel):
+Ez a projekt **három alap módon** mutatja be ugyanazt a szerződés-elemzési feladatot (a felhő alapú megoldás RAG-gel is kiegészíthető):
 
 | Módszer | Célcsoport | Infrastruktúra |
 |---------|------------|----------------|
 | **Gemini** (csatolt PDF) | Gyors kipróbálás, egyedi dokumentumok | Nincs – Gemini felület + prompt |
 | **Gemini AI Studio** | Fejlesztők, prompt finomhangolás | Nincs – AI Studio + prompt |
 | **Felhő alapú alkalmazás** | Csapatok, production, skálázás | GCP Cloud Run + GitHub Actions |
-| **RAG modul** *(opcionális)* | Céges belső szabályzatokkal összevetés | A 4. szekció backendje + szabályzat fájlok |
+| **RAG modul** *(ki-be kapcsolható)* | Céges belső szabályzatokkal összevetés | A 4. szekció backendje + szabályzat fájlok |
 
-Mindhárom alap módszer **ugyanazt a prompt logikát** követi: összefoglaló, kulcs klauzulák, kockázatok és szerződés minősítése magyar nyelven. A [5. szekció](#5-opcionális-rag-modul--belső-szabályzatokkal-összevetés) opcionálisan kiegészíti ezt belső szabályzatokkal.
+Mindhárom alap módszer **ugyanazt a prompt logikát** követi: összefoglaló, kulcs klauzulák, kockázatok és szerződés minősítése magyar nyelven. A [5. szekció](#5-rag-modul--belső-szabályzatokkal-összevetés) kiegészíti ezt belső szabályzatokkal (alapértelmezetten bekapcsolva, kikapcsolható).
 
 ---
 
@@ -739,7 +739,7 @@ gcloud run deploy contract-analyzer-frontend \
 ```
 trn-gcp-ai-contract-analyzer/
 ├── backend/           # FastAPI backend (main.py, rag.py, dev.sh, pyproject.toml)
-│   └── policies/      # Opcionális RAG szabályzat fájlok (.md, .txt)
+│   └── policies/      # RAG szabalyzat fajlok (.md, .txt)
 ├── frontend/          # React + Vite UI
 ├── scripts/           # setup.sh, setup-wif.sh, setup-github.sh, teardown*.sh
 ├── .github/workflows/ # lint.yml, deploy.yml
@@ -748,11 +748,11 @@ trn-gcp-ai-contract-analyzer/
 
 ---
 
-## 5. Opcionális RAG modul – belső szabályzatokkal összevetés
+## 5. RAG modul – belső szabályzatokkal összevetés
 
-A [4. szekció](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással) felhő alapú megoldás **opcionálisan** kiegészíthető egy egyszerű **RAG** (Retrieval Augmented Generation) modullal: a feltöltött szerződést a cég belső szabályzataival is összeveti a Gemini.
+A [4. szekció](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással) felhő alapú megoldás egy egyszerű **RAG** (Retrieval Augmented Generation) modullal egészíthető ki: a feltöltött szerződést a cég belső szabályzataival is összeveti a Gemini.
 
-> **Alapértelmezetten kikapcsolva.** Ha nem engedélyezed, az alkalmazás pontosan úgy működik, mint eddig – ugyanaz az API, ugyanaz a UI, ugyanazok az eredmény mezők.
+> **Alapértelmezetten bekapcsolva.** A `setup.sh`, a GitHub Actions deploy (`deploy.yml`) és a `backend/.env.example` mind `RAG_ENABLED=true` értéket állít. Ha nem akarod használni, állítsd `RAG_ENABLED=false`-ra – az alkalmazás sima PDF-elemzést végez, ugyanazzal az API-val és UI-val.
 
 ### Mit csinál?
 
@@ -780,7 +780,7 @@ flowchart LR
     GEM --> BE
 ```
 
-### Bekapcsolás
+### Konfiguráció
 
 **1. Környezeti változók** (`backend/.env` vagy Cloud Run):
 
@@ -792,9 +792,17 @@ RAG_MAX_POLICY_CHARS=30000
 
 | Változó | Alapértelmezés | Jelentés |
 |---------|----------------|----------|
-| `RAG_ENABLED` | `false` | RAG modul elérhető-e |
+| `RAG_ENABLED` | `true` | RAG modul elérhető-e (`false` = kikapcsolva) |
 | `RAG_POLICY_DIR` | `policies` | Szabályzat fájlok mappája (a `backend/` alatt) |
 | `RAG_MAX_POLICY_CHARS` | `30000` | Max. karakter a promptba injektált szabályzatból |
+
+**Kikapcsolás Cloud Run-on:**
+
+```bash
+gcloud run services update contract-analyzer-backend \
+  --region europe-west1 \
+  --update-env-vars="RAG_ENABLED=false"
+```
 
 **2. Szabályzat fájlok**
 
@@ -833,13 +841,13 @@ curl -X POST http://localhost:8080/analyze \
 
 ### Cloud Run deploy
 
-A CI alapértelmezetten **nem** kapcsolja be a RAG-et. Bekapcsoláshoz add hozzá az env var-okat a deploy parancshoz:
+A GitHub Actions pipeline (`deploy.yml`) alapértelmezetten **RAG-gel** deployol:
 
 ```bash
---set-env-vars="...,RAG_ENABLED=true,RAG_POLICY_DIR=policies"
+--set-env-vars="...,RAG_ENABLED=true,RAG_POLICY_DIR=policies,RAG_MAX_POLICY_CHARS=30000"
 ```
 
-A szabályzat fájlok a backend forráskóddal együtt deployolódnak (source deploy), ha a `policies/` mappában vannak.
+A szabályzat fájlok a backend forráskóddal együtt deployolódnak (source deploy), ha a `policies/` mappában vannak. Kikapcsoláshoz módosítsd a `RAG_ENABLED` értékét a `deploy.yml`-ban, vagy futtasd a fenti `gcloud run services update` parancsot.
 
 ### Miért nevezhető ez RAG-nek?
 
@@ -891,7 +899,7 @@ Ez egy **egyszerűsített RAG** – a minta ugyanaz (lekérés → kiegészíté
 
 - **Nincs külön vektor adatbázis** – a szabályzatok közvetlenül fájlokból töltődnek (`policies/*.md`, `.txt`), nem Pinecone/Chroma/Vertex AI Vector Search.
 - **Nincs embedding API** – nem számítunk szöveg-vektorokat, és nem a szerződéshez legközelebbi chunk-okat keressük. Ha kevés a szabályzat, szinte mind bekerül; ha sok, a `RAG_MAX_POLICY_CHARS` limit miatt **round-robin** módon választunk darabokat (minden szabályzatból arányosan). Ez kisebb tudásbázisnál (tipikus céges policy-készlet) gyakran elég; nagy, sok száz oldalas könyvtárnál már kevésbé pontos.
-- **Nem „full RAG”** – az ipari, nagy skálájú megoldások embedding + vektor keresést használnak. Itt szándékosan egyszerűbb utat választottunk: kevesebb infrastruktúra, ugyanaz az API és deploy, opcionális be/ki kapcsolás.
+- **Nem „full RAG”** – az ipari, nagy skálájú megoldások embedding + vektor keresést használnak. Itt szándékosan egyszerűbb utat választottunk: kevesebb infrastruktúra, ugyanaz az API és deploy, backend szinten ki-be kapcsolható (`RAG_ENABLED`), elemzésenként pedig a UI jelölőnégyzet.
 - **Nem kötelező** – production-ben is kikapcsolva hagyható; a meglévő workflow érintetlen marad.
 
 Összefoglalva: **RAG-lite** vagy **fájl-alapú kontextus-RAG** – nem kevésbé „RAG”, csak kevésbé komplex lekérési réteggel, mint egy embedding-alapú rendszer.
