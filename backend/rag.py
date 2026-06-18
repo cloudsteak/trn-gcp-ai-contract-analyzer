@@ -6,7 +6,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-RAG_ENABLED = os.getenv("RAG_ENABLED", "false").lower() in ("1", "true", "yes")
+RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() in ("1", "true", "yes")
 RAG_POLICY_DIR = os.getenv("RAG_POLICY_DIR", "policies")
 RAG_MAX_POLICY_CHARS = int(os.getenv("RAG_MAX_POLICY_CHARS", "30000"))
 RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "1500"))
