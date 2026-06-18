@@ -6,11 +6,94 @@ PDF szerződések elemzése a Gemini API (Gemini Enterprise Agent Platform) seg�
 
 ## Tartalom
 
-1. [Általános ismerető](#1-általános-ismerető) *(ez a szekció)*
-2. [Szerződés elemzés Gemini-vel](#2-szerződés-elemzés-gemini-vel)
-3. [Szerződés elemzés Gemini AI Studioval](#3-szerződés-elemzés-gemini-ai-studioval)
-4. [Szerződés elemzés skálázható felhő alapú megoldással](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással)
-5. [Opcionális RAG modul – belső szabályzatokkal összevetés](#5-opcionális-rag-modul--belső-szabályzatokkal-összevetés)
+1. [Gcloud telepítés](#gcloud-telepítés)
+2. [Általános ismerető](#1-általános-ismerető) *(ez a szekció)*
+3. [Szerződés elemzés Gemini-vel](#2-szerződés-elemzés-gemini-vel)
+4. [Szerződés elemzés Gemini AI Studioval](#3-szerződés-elemzés-gemini-ai-studioval)
+5. [Szerződés elemzés skálázható felhő alapú megoldással](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással)
+6. [Opcionális RAG modul – belső szabályzatokkal összevetés](#5-opcionális-rag-modul--belső-szabályzatokkal-összevetés)
+
+---
+
+## Gcloud telepítés
+
+Gyors útmutató a GCP-re való telepítéshez. Részletek alább a [4. szekcióban](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással).
+
+**Előfeltételek:** `gcloud` CLI, GCP projekt számlázással.
+
+### 1. Környezeti változók beállítása
+
+```bash
+export GCP_PROJECT_ID=<a-gcp-projekt-id>
+export GCP_REGION=europe-west1
+export BACKEND_SERVICE=contract-analyzer-backend
+export FRONTEND_SERVICE=contract-analyzer-frontend
+export GITHUB_REPO=<szervezet>/<repo-nev>
+```
+
+### 2. Bejelentkezés GCP-be
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+```
+
+### 3. Aktuális projekt beállítása
+
+```bash
+gcloud config set project "${GCP_PROJECT_ID}"
+gcloud auth application-default set-quota-project "${GCP_PROJECT_ID}"
+```
+
+### 4. Infrastruktúra telepítése
+
+```bash
+./scripts/setup.sh
+```
+
+A script kiírja a Cloud Run URL-eket.
+
+### 5. GitHub Actions hitelesítés (WIF)
+
+```bash
+./scripts/setup-wif.sh
+```
+
+### 6. GitHub Secrets
+
+A `setup-wif.sh` a végén kiírja az értékeket. Állítsd be:
+
+GitHub repó → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+
+| Secret | Érték |
+|--------|-------|
+| `GCP_PROJECT_ID` | GCP projekt azonosító |
+| `GCP_WIF_PROVIDER` | WIF provider teljes resource neve |
+| `GCP_WIF_SERVICE_ACCOUNT` | `contract-analyzer-cicd-sa@...` e-mail |
+
+### 7. Alkalmazás deploy
+
+Ha a forráskódban nincs módosítás, adj hozzá egy-egy üres sort ehhez:
+
+- `backend/main.py`
+- `frontend/src/App.jsx`
+
+1. GitHub repó → **Pull requests** → **New pull request** → **Create pull request**
+2. **Merge** a PR-t a `main` branchre
+
+A GitHub Actions automatikusan deployol – pár perc múlva él az alkalmazás. Követés: **Actions** → **Deploy**.
+
+### 8. Tesztelés
+
+1. Nyisd meg a frontend weboldalt a böngészőben. Az URL-t a `setup.sh` a végén kiírja, vagy a GCP Console → **Cloud Run** → `contract-analyzer-frontend` → **URL**.
+2. Tölts fel egy szerződés PDF-et, indítsd el az elemzést, és nézd meg az eredményt.
+
+### 9. Erőforrások törlése (demo újraindítás)
+
+```bash
+./scripts/teardown.sh
+./scripts/teardown-wif.sh
+```
 
 ---
 
@@ -425,6 +508,8 @@ cd frontend && npm install && npm run lint && npm run build
 ```
 
 ### GCP telepítés és tesztelés
+
+> **Gyors útmutató:** A lépések rövid összefoglalója a [Gcloud telepítés](#gcloud-telepítés) szekcióban.
 
 #### Telepítési sorrend (ajánlott)
 
