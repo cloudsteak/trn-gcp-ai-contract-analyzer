@@ -261,7 +261,7 @@ flowchart TB
     subgraph L4["4. Infrastruktúra · Deploy"]
         direction LR
         CB["🏗️ Cloud Build<br/>source deploy<br/>buildpacks"]
-        GH["📦 GitHub<br/>push → main"]
+        GH["📦 GitHub<br/>PR merge → main"]
     end
 
     subgraph L5["5. CI/CD · GitHub Actions"]
@@ -396,7 +396,7 @@ flowchart LR
     subgraph GCP["☁️ GCP production – egyszeri + automatikus"]
         S1["1. setup.sh<br/>infrastruktúra"] --> S2["2. setup-wif.sh<br/>Workload Identity Federation (WIF)"]
         S2 --> S3["3. setup-github.sh<br/>GitHub secrets"]
-        S3 --> S4["4. push → main"]
+        S3 --> S4["4. PR merge → main"]
         S4 --> S5["deploy.yml"]
     end
 
@@ -518,7 +518,7 @@ cd frontend && npm install && npm run lint && npm run build
 1. setup.sh          →  GCP infrastruktúra (egyszer)
 2. setup-wif.sh      →  Workload Identity Federation (WIF) – GitHub Actions (egyszer, JSON kulcs nélkül)
 3. setup-github.sh   →  GitHub Secrets (gh CLI)
-4. git push main     →  alkalmazás deploy (automatikus, deploy.yml)
+4. PR merge main      →  alkalmazás deploy (automatikus, deploy.yml)
 5. tesztelés         →  Cloud Run URL-eken
 ```
 
