@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
 PROJECT_ID="${GCP_PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-}}"
 REGION="${GCP_REGION:-europe-west1}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-contract-analyzer-backend}"
@@ -27,16 +31,11 @@ else
     --display-name="Contract Analyzer Service Account"
 fi
 
-echo "IAM szerepkorok hozzarendelese a service accounthoz..."
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/run.invoker" \
-  --condition=None
+wait_for_service_account "${SA_EMAIL}"
 
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/aiplatform.user" \
-  --condition=None
+echo "IAM szerepkorok hozzarendelese a service accounthoz..."
+add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${SA_EMAIL}" "roles/run.invoker"
+add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${SA_EMAIL}" "roles/aiplatform.user"
 
 echo "Cloud Run backend service letrehozasa placeholder image-dzsel..."
 if gcloud run services describe "${BACKEND_SERVICE}" --region="${REGION}" >/dev/null 2>&1; then
@@ -85,3 +84,4 @@ echo ""
 echo "Kovetkezo lepes: GitHub Actions WIF beallitasa (JSON kulcs nelkul):"
 echo "  export GITHUB_REPO=<szervezet>/<repo-nev>"
 echo "  ./scripts/setup-wif.sh"
+echo "  ./scripts/setup-github.sh"

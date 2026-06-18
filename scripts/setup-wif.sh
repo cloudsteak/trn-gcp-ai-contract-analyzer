@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
 PROJECT_ID="${GCP_PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-}}"
 GITHUB_REPO="${GITHUB_REPO:-}"
 POOL_ID="${WIF_POOL_ID:-contract-analyzer-pool}"
@@ -42,6 +46,8 @@ else
     --display-name="Contract Analyzer GitHub Actions Deploy"
 fi
 
+wait_for_service_account "${CICD_SA_EMAIL}"
+
 COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 CLOUDBUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
 
@@ -54,91 +60,71 @@ for role in \
   roles/storage.objectAdmin \
   roles/logging.logWriter \
   roles/serviceusage.serviceUsageConsumer; do
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${CICD_SA_EMAIL}" \
-    --role="${role}" \
-    --condition=None
+  add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${CICD_SA_EMAIL}" "${role}"
 done
 
 echo "CI/CD service account onmagat hasznalhatja build service accountkent..."
-gcloud iam service-accounts add-iam-policy-binding "${CICD_SA_EMAIL}" \
-  --role="roles/iam.serviceAccountUser" \
-  --member="serviceAccount:${CICD_SA_EMAIL}" \
-  --condition=None
+add_sa_iam_binding "${CICD_SA_EMAIL}" "serviceAccount:${CICD_SA_EMAIL}" "roles/iam.serviceAccountUser"
 
 echo "CI/CD service account hasznalhatja az alap Cloud Build / Compute accountokat..."
 for BUILD_SA in "${CLOUDBUILD_SA}" "${COMPUTE_SA}"; do
   if gcloud iam service-accounts describe "${BUILD_SA}" >/dev/null 2>&1; then
-    gcloud iam service-accounts add-iam-policy-binding "${BUILD_SA}" \
-      --role="roles/iam.serviceAccountUser" \
-      --member="serviceAccount:${CICD_SA_EMAIL}" \
-      --condition=None
+    add_sa_iam_binding "${BUILD_SA}" "serviceAccount:${CICD_SA_EMAIL}" "roles/iam.serviceAccountUser"
   fi
 done
 
 echo "Cloud Build service account deployolhat a futo Cloud Run service accounttal..."
 if gcloud iam service-accounts describe "${CLOUDBUILD_SA}" >/dev/null 2>&1; then
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${CLOUDBUILD_SA}" \
-    --role="roles/run.builder" \
-    --condition=None
-  gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA_EMAIL}" \
-    --role="roles/iam.serviceAccountUser" \
-    --member="serviceAccount:${CLOUDBUILD_SA}" \
-    --condition=None 2>/dev/null || {
+  add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${CLOUDBUILD_SA}" "roles/run.builder"
+  if gcloud iam service-accounts describe "${RUNTIME_SA_EMAIL}" >/dev/null 2>&1; then
+    add_sa_iam_binding "${RUNTIME_SA_EMAIL}" "serviceAccount:${CLOUDBUILD_SA}" "roles/iam.serviceAccountUser"
+  else
     echo "Figyelem: a ${RUNTIME_SA} meg nem letezik. Futtasd elobb a setup.sh-t, majd ujra ezt a scriptet."
-  }
+  fi
 fi
 
 echo "Jogosultsag a futo Cloud Run service account hasznalatahoz..."
-gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA_EMAIL}" \
-  --role="roles/iam.serviceAccountUser" \
-  --member="serviceAccount:${CICD_SA_EMAIL}" \
-  --condition=None 2>/dev/null || {
+if gcloud iam service-accounts describe "${RUNTIME_SA_EMAIL}" >/dev/null 2>&1; then
+  add_sa_iam_binding "${RUNTIME_SA_EMAIL}" "serviceAccount:${CICD_SA_EMAIL}" "roles/iam.serviceAccountUser"
+else
   echo "Figyelem: a ${RUNTIME_SA} meg nem letezik. Futtasd elobb a setup.sh-t, majd ujra ezt a scriptet."
-}
-
-echo "Workload Identity Pool letrehozasa: ${POOL_ID}"
-if gcloud iam workload-identity-pools describe "${POOL_ID}" \
-  --location=global >/dev/null 2>&1; then
-  echo "A WIF pool mar letezik, kihagyva."
-else
-  gcloud iam workload-identity-pools create "${POOL_ID}" \
-    --location=global \
-    --display-name="Contract Analyzer GitHub Actions"
 fi
 
-echo "GitHub OIDC provider letrehozasa: ${PROVIDER_ID}"
-if gcloud iam workload-identity-pools providers describe "${PROVIDER_ID}" \
-  --location=global \
-  --workload-identity-pool="${POOL_ID}" >/dev/null 2>&1; then
-  echo "A WIF provider mar letezik, kihagyva."
-else
-  gcloud iam workload-identity-pools providers create-oidc "${PROVIDER_ID}" \
-    --location=global \
-    --workload-identity-pool="${POOL_ID}" \
-    --display-name="GitHub Actions" \
-    --issuer-uri="https://token.actions.githubusercontent.com" \
-    --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
-    --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
-fi
+ensure_wif_pool "${PROJECT_ID}" "${POOL_ID}" "Contract Analyzer GitHub Actions"
+ensure_wif_oidc_provider "${PROJECT_ID}" "${POOL_ID}" "${PROVIDER_ID}" "${GITHUB_REPO}"
 
 WIF_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 PRINCIPAL="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GITHUB_REPO}"
 
 echo "WIF hozzaferest kotve a CI/CD service accounthoz..."
-gcloud iam service-accounts add-iam-policy-binding "${CICD_SA_EMAIL}" \
-  --role="roles/iam.workloadIdentityUser" \
-  --member="${PRINCIPAL}" \
-  --condition=None
+add_sa_iam_binding "${CICD_SA_EMAIL}" "${PRINCIPAL}" "roles/iam.workloadIdentityUser"
 
 echo ""
 echo "WIF setup kesz."
 echo ""
-echo "Allitsd be a kovetkezo GitHub Secrets-eket (Settings -> Secrets and variables -> Actions):"
+echo "Kornyezeti valtozok (masold be vagy futtasd):"
+echo ""
+echo "export GCP_PROJECT_ID=${PROJECT_ID}"
+echo "export GITHUB_REPO=${GITHUB_REPO}"
+echo "export WIF_POOL_ID=${POOL_ID}"
+echo "export WIF_PROVIDER_ID=${PROVIDER_ID}"
+echo "export CICD_SERVICE_ACCOUNT=${CICD_SA}"
+echo "export SERVICE_ACCOUNT=${RUNTIME_SA}"
+echo "export GCP_WIF_PROVIDER=${WIF_PROVIDER}"
+echo "export GCP_WIF_SERVICE_ACCOUNT=${CICD_SA_EMAIL}"
+echo ""
+echo "GitHub Secrets (Settings -> Secrets and variables -> Actions):"
 echo ""
 echo "  GCP_PROJECT_ID=${PROJECT_ID}"
 echo "  GCP_WIF_PROVIDER=${WIF_PROVIDER}"
 echo "  GCP_WIF_SERVICE_ACCOUNT=${CICD_SA_EMAIL}"
 echo ""
 echo "A JSON kulcs nem szukseges – a deploy.yml Workload Identity Federation-t hasznal."
+echo ""
+echo "Kovetkezo lepes (GitHub secrets, gh CLI):"
+echo "  ./scripts/setup-github.sh"
+echo ""
+echo "Teardown (demo ujrainditashoz, forditott sorrendben):"
+echo "  ./scripts/teardown.sh"
+echo "  ./scripts/teardown-wif.sh"
+echo "  ./scripts/teardown-github.sh"

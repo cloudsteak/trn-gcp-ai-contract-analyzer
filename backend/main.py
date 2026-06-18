@@ -44,7 +44,6 @@ ANALYSIS_PROMPT = (
 
 genai_client: genai.Client | None = None  # Gemini kliens eletciklus alatt inicializalva
 
-
 class KeyClause(BaseModel):
     title: str
     description: str
