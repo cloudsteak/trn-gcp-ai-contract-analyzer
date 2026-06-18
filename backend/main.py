@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from rag import build_policy_context, build_rag_prompt, get_rag_status, is_rag_available
 
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
