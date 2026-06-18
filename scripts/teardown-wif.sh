@@ -61,3 +61,4 @@ else
 fi
 
 echo "WIF teardown kesz."
+echo "Kovetkezo lepes: ./scripts/teardown-github.sh (GitHub secrets, gh CLI)"
