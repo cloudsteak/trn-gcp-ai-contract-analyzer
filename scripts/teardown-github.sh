@@ -83,6 +83,9 @@ done < <(gh secret list --repo "${GITHUB_REPO}" --app actions --json name -q '.[
 secret_exists() {
   local name="$1"
   local item
+  if [[ ${#EXISTING_SECRETS[@]} -eq 0 ]]; then
+    return 1
+  fi
   for item in "${EXISTING_SECRETS[@]}"; do
     [[ "${item}" == "${name}" ]] && return 0
   done
@@ -173,7 +176,7 @@ if [[ "${AUTO_YES}" != "true" ]]; then
   fi
 fi
 
-for name in "${SECRETS_TO_DELETE[@]}"; do
+for name in "${SECRETS_TO_DELETE[@]+"${SECRETS_TO_DELETE[@]}"}"; do
   echo "Secret torlese: ${name}"
   gh secret delete "${name}" --repo "${GITHUB_REPO}" --app actions
 done

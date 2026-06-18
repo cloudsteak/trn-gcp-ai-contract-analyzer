@@ -83,7 +83,7 @@ A GitHub Actions automatikusan deployol – pár perc múlva él az alkalmazás.
 ### 8. Tesztelés
 
 1. Nyisd meg a frontend weboldalt a böngészőben. Az URL-t a `setup.sh` a végén kiírja, vagy a GCP Console → **Cloud Run** → `contract-analyzer-frontend` → **URL**.
-2. Tölts fel egy szerződés PDF-et, indítsd el az elemzést, és nézd meg az eredményt.
+2. Tölts fel egy szerződés PDF-et (contracts mappa), indítsd el az elemzést, és nézd meg az eredményt.
 
 ### 9. RAG – belső szabályzatokkal összevetés
 
