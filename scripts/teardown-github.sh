@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GitHub Actions secrets torlese – a setup-github.sh altal beallitott ertekek
+# GitHub Actions secrets es pipeline workflow run history torlese – a setup-github.sh altal beallitott ertekek
 set -euo pipefail
 
 GITHUB_REPO="${GITHUB_REPO:-}"
@@ -14,17 +14,24 @@ GITHUB_SECRETS=(
   GCP_SERVICE_ACCOUNT
 )
 
+# A CI/CD pipeline workflow-k (deploy + lint)
+GITHUB_WORKFLOWS=(
+  deploy.yml
+  lint.yml
+)
+
 usage() {
   cat <<'EOF'
 Hasznalat:
   export GITHUB_REPO=<szervezet>/<repo-nev>   # opcionalis, ha gh a cwd repot latja
   ./scripts/teardown-github.sh [--yes]
 
-Torli a setup-github.sh altal beallitott GitHub Actions secrets ertekeket.
+Torli a setup-github.sh altal beallitott GitHub Actions secrets ertekeket,
+es uriteti a pipeline (deploy + lint) workflow run history-t.
 
 Elofeltetelek:
   - gh CLI telepitve es bejelentkezve (gh auth login)
-  - repo admin jogosultsag a secrets torleshez
+  - repo admin jogosultsag a secrets es workflow run torleshez
 
 Kornyezeti valtozok:
   GITHUB_REPO   Cel repository (pl. cloudsteak/trn-gcp-ai-contract-analyzer)
@@ -76,6 +83,9 @@ done < <(gh secret list --repo "${GITHUB_REPO}" --app actions --json name -q '.[
 secret_exists() {
   local name="$1"
   local item
+  if [[ ${#EXISTING_SECRETS[@]} -eq 0 ]]; then
+    return 1
+  fi
   for item in "${EXISTING_SECRETS[@]}"; do
     [[ "${item}" == "${name}" ]] && return 0
   done
@@ -90,16 +100,73 @@ for name in "${GITHUB_SECRETS[@]}"; do
   fi
 done
 
-if [[ ${#SECRETS_TO_DELETE[@]} -eq 0 ]]; then
-  echo "Nincs torlendo GitHub secret a ${GITHUB_REPO} repoban."
+count_workflow_runs() {
+  local workflow="$1"
+  gh run list --repo "${GITHUB_REPO}" -w "${workflow}" \
+    --json databaseId -q 'length' -L 1000 2>/dev/null || echo 0
+}
+
+delete_workflow_runs() {
+  local workflow="$1"
+  local deleted=0
+
+  while true; do
+    local batch_deleted=0
+
+    while IFS= read -r run_id; do
+      [[ -z "${run_id}" ]] && continue
+      echo "Workflow run torlese: ${workflow} #${run_id}"
+      if gh run delete "${run_id}" --repo "${GITHUB_REPO}"; then
+        deleted=$((deleted + 1))
+        batch_deleted=$((batch_deleted + 1))
+      fi
+    done < <(
+      gh run list --repo "${GITHUB_REPO}" -w "${workflow}" \
+        --json databaseId -q '.[].databaseId' -L 100 2>/dev/null || true
+    )
+
+    if [[ "${batch_deleted}" -eq 0 ]]; then
+      break
+    fi
+  done
+
+  echo "${workflow}: ${deleted} run torolve."
+}
+
+WORKFLOW_RUN_COUNTS=()
+TOTAL_RUNS=0
+
+for workflow in "${GITHUB_WORKFLOWS[@]}"; do
+  count="$(count_workflow_runs "${workflow}")"
+  WORKFLOW_RUN_COUNTS+=("${workflow}:${count}")
+  TOTAL_RUNS=$((TOTAL_RUNS + count))
+done
+
+if [[ ${#SECRETS_TO_DELETE[@]} -eq 0 && "${TOTAL_RUNS}" -eq 0 ]]; then
+  echo "Nincs torlendo GitHub secret vagy pipeline workflow run a ${GITHUB_REPO} repoban."
   exit 0
 fi
 
 echo "Repository: ${GITHUB_REPO}"
 echo ""
-echo "Torlendo secrets (${#SECRETS_TO_DELETE[@]}):"
-printf '  - %s\n' "${SECRETS_TO_DELETE[@]}"
-echo ""
+
+if [[ ${#SECRETS_TO_DELETE[@]} -gt 0 ]]; then
+  echo "Torlendo secrets (${#SECRETS_TO_DELETE[@]}):"
+  printf '  - %s\n' "${SECRETS_TO_DELETE[@]}"
+  echo ""
+fi
+
+if [[ "${TOTAL_RUNS}" -gt 0 ]]; then
+  echo "Torlendo pipeline workflow run-ok (${TOTAL_RUNS} osszesen):"
+  for entry in "${WORKFLOW_RUN_COUNTS[@]}"; do
+    workflow="${entry%%:*}"
+    count="${entry##*:}"
+    if [[ "${count}" -gt 0 ]]; then
+      printf '  - %s (%s run)\n' "${workflow}" "${count}"
+    fi
+  done
+  echo ""
+fi
 
 if [[ "${AUTO_YES}" != "true" ]]; then
   read -r -p "Folytatod a torlest? [y/N] " confirm
@@ -109,10 +176,18 @@ if [[ "${AUTO_YES}" != "true" ]]; then
   fi
 fi
 
-for name in "${SECRETS_TO_DELETE[@]}"; do
+for name in "${SECRETS_TO_DELETE[@]+"${SECRETS_TO_DELETE[@]}"}"; do
   echo "Secret torlese: ${name}"
   gh secret delete "${name}" --repo "${GITHUB_REPO}" --app actions
 done
+
+if [[ "${TOTAL_RUNS}" -gt 0 ]]; then
+  echo ""
+  echo "Pipeline workflow run history uritese..."
+  for workflow in "${GITHUB_WORKFLOWS[@]}"; do
+    delete_workflow_runs "${workflow}"
+  done
+fi
 
 echo ""
 echo "GitHub teardown kesz: ${GITHUB_REPO}"

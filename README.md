@@ -83,7 +83,7 @@ A GitHub Actions automatikusan deployol – pár perc múlva él az alkalmazás.
 ### 8. Tesztelés
 
 1. Nyisd meg a frontend weboldalt a böngészőben. Az URL-t a `setup.sh` a végén kiírja, vagy a GCP Console → **Cloud Run** → `contract-analyzer-frontend` → **URL**.
-2. Tölts fel egy szerződés PDF-et, indítsd el az elemzést, és nézd meg az eredményt.
+2. Tölts fel egy szerződés PDF-et (contracts mappa), indítsd el az elemzést, és nézd meg az eredményt.
 
 ### 9. RAG – belső szabályzatokkal összevetés
 
@@ -133,7 +133,7 @@ Részletes leírás: [5. szekció – RAG modul](#5-rag-modul--belső-szabályza
 ```bash
 ./scripts/teardown.sh
 ./scripts/teardown-wif.sh
-./scripts/teardown-github.sh
+./scripts/teardown-github.sh   # secrets + pipeline workflow run history
 ```
 
 ---
@@ -461,7 +461,7 @@ flowchart LR
 | Alkalmazás kód (backend + frontend) | **GitHub Actions** `deploy.yml` | Forráskód → Cloud Run (source deploy) | Minden `main` push |
 | Lint ellenőrzés | GitHub Actions `lint.yml` | Kódminőség PR-en | Minden pull request |
 | Demo törlése (GCP) | `scripts/teardown.sh` → `teardown-wif.sh` | Cloud Run, runtime SA, WIF, CI/CD SA | Demo újraindításkor |
-| Demo törlése (GitHub) | `scripts/teardown-github.sh` | Repository secrets | `teardown-wif.sh` után |
+| Demo törlése (GitHub) | `scripts/teardown-github.sh` | Repository secrets, pipeline workflow run history (`deploy.yml`, `lint.yml`) | `teardown-wif.sh` után |
 | Manuális `gcloud run deploy` | *(lásd lent)* | Ugyanaz, amit a CI is csinál | **Csak kivételes esetben** |
 
 > **Fontos:** A Cloud Run-ra való telepítés **alapértelmezetten a GitHub Actions-szel történik**. A `setup.sh` csak az infrastruktúrát készíti elő.
@@ -608,7 +608,7 @@ export GITHUB_REPO=<szervezet>/<repo-nev>   # opcionális, ha a repo gyökeréb�
 
 A script a GCP-ből számolja ki a WIF provider és CI/CD SA értékeket. A végén megjelenik a beállítandó secrets listája és a kérdés: `Folytatod a beallitast? [y/N]` → nyomj **`y`**, Enter.
 
-Manuális beállítás is lehetséges (Settings → Secrets and variables → Actions). A demo végén a [`teardown-github.sh`](#6-erőforrások-törlése-demo-újraindítás) törli ezeket.
+Manuális beállítás is lehetséges (Settings → Secrets and variables → Actions). A demo végén a [`teardown-github.sh`](#6-erőforrások-törlése-demo-újraindítás) törli a secrets-eket és kiüríti a pipeline (`deploy.yml`, `lint.yml`) workflow run history-t.
 
 **GitHub Secrets:**
 
@@ -651,7 +651,7 @@ A setup lépések **fordított sorrendben** futtatandók: először a GCP runtim
 ```mermaid
 flowchart LR
     T1["1. teardown.sh<br/>Cloud Run, runtime SA"] --> T2["2. teardown-wif.sh<br/>Workload Identity Federation (WIF)"]
-    T2 --> T3["3. teardown-github.sh<br/>GitHub secrets"]
+    T2 --> T3["3. teardown-github.sh<br/>GitHub secrets + workflow runs"]
 ```
 
 **1–2. GCP erőforrások** (`gcloud` CLI):
@@ -683,6 +683,11 @@ export GITHUB_REPO=<szervezet>/<repo-nev>   # opcionális, ha a repo gyökeréb�
 | `GITHUB_REPO` | `org/repo` formátum – automatikusan felismeri, ha a repó klónjából fut |
 
 A script **csak a létező** értékeket törli (idempotens). A `--yes` kapcsoló vagy `AUTO_YES=true` kihagyja az interaktív megerősítést.
+
+| Mit töröl / ürít? | Részletek |
+|-------------------|-----------|
+| GitHub Actions secrets | A `setup-github.sh` által beállított értékek (lásd lent) |
+| Pipeline workflow run history | A `deploy.yml` és `lint.yml` workflow-k összes futtatása |
 
 **Törölt GitHub Secrets:**
 
