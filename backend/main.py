@@ -187,8 +187,9 @@ async def _analyze_pdf(pdf_bytes: bytes, *, use_rag: bool = False) -> AnalyzeRes
         response.text,
         include_policy_findings=rag_active,
     )
+    # RagAnalysisPayload tartalmaz policy_findings mezot is, duplikalt kwargs elkerulese
     return AnalyzeResponse(
-        **analysis.model_dump(),
+        **analysis.model_dump(exclude={"policy_findings"}),
         token_usage=_extract_token_usage(response),
         rag_used=rag_active,
         policy_findings=policy_findings,
