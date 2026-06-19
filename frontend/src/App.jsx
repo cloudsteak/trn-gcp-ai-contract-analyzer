@@ -307,6 +307,7 @@ function App() {
               )}
             </article>
 
+
             <article className="result-card result-card--risk">
               <h2>Kockázatos részek</h2>
               {result.risk_flags?.length ? (
