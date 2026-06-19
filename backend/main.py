@@ -23,6 +23,7 @@ GEMINI_LOCATION = os.getenv("GEMINI_LOCATION", "global")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 PORT = int(os.getenv("PORT", "8080"))
 
+
 ANALYSIS_PROMPT = (
     "Elemezd a csatolt szerződés PDF-et, és adj vissza egy JSON objektumot "
     "pontosan az alábbi mezőkkel:\n\n"
