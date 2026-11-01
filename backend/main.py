@@ -17,7 +17,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
 GEMINI_LOCATION = os.getenv("GEMINI_LOCATION", "global")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
@@ -101,7 +101,7 @@ def _build_genai_client() -> genai.Client:
     if not GCP_PROJECT_ID:
         raise RuntimeError("A GCP_PROJECT_ID környezeti változó kötelező")
 
-    # gemini-3.1-flash-lite global endpointot hasznal, nem regionalist
+    # gemini-3.5-flash hivas a global endpointon megy, nem a Cloud Run regioban
     return genai.Client(
         vertexai=True,
         project=GCP_PROJECT_ID,

@@ -216,7 +216,7 @@ A [Google AI Studio](https://aistudio.google.com) fejlesztői felületen ugyanaz
 
 1. Nyisd meg: [https://aistudio.google.com](https://aistudio.google.com)
 2. Hozz létre egy **Playground** / **Chat** promptot.
-3. Válassz modellt (pl. `gemini-3.1-flash-lite` vagy más elérhető Gemini 3 verzió).
+3. Válassz modellt (pl. `gemini-3.5-flash` vagy más elérhető Gemini 3 verzió).
 4. Csatold a PDF szerződést (Upload file, vagy Drive integráció ha elérhető).
 5. Illeszd be a [2. szekció promptját](#elemzési-prompt).
 6. Futtasd, és értékeld a választ.
@@ -251,7 +251,7 @@ flowchart TB
     BE["⚙️ Backend<br/>FastAPI"]
 
     subgraph GCP["☁️ Google Cloud Platform"]
-        Gemini["🤖 Gemini modell<br/>gemini-3.1-flash-lite"]
+        Gemini["🤖 Gemini modell<br/>gemini-3.5-flash"]
     end
 
     User ==>|"PDF feltöltés"| FE
@@ -297,7 +297,7 @@ flowchart TB
 
     subgraph L3["3. AI réteg · Gemini Enterprise Agent Platform"]
         direction TB
-        GEAP["🤖 gemini-3.1-flash-lite<br/>global endpoint · JSON válasz"]
+        GEAP["🤖 gemini-3.5-flash<br/>global endpoint · JSON válasz"]
         SA["🔐 contract-analyzer-sa<br/>ADC · roles/aiplatform.user"]
     end
 
@@ -365,7 +365,7 @@ flowchart TB
 |-----------|-------------|------------|--------------|
 | **Frontend** | React, Vite, `serve` | PDF feltöltés, elemzés, megfelelőségi skála, eredmények, token statisztika | Csak UI – nem tartalmaz üzleti logikát vagy AI hívást |
 | **Backend** | FastAPI, uvicorn, `google-genai` | PDF fogadása, Gemini hívás, JSON validálás | Az AI integráció és adatfeldolgozás egy helyen, biztonságosan |
-| **Gemini Enterprise Agent Platform** | `gemini-3.1-flash-lite` | Szerződés elemzése magyar JSON-nal | Managed AI – nem kell saját modellt futtatni |
+| **Gemini Enterprise Agent Platform** | `gemini-3.5-flash` | Szerződés elemzése magyar JSON-nal | Managed AI – nem kell saját modellt futtatni |
 | **Cloud Run** | Source deploy | Skálázható futtatás HTTPS-sel | Serverless – nincs szerver üzemeltetés |
 | **Service Account** | `contract-analyzer-sa` | ADC auth, IAM jogosultságok | Az alkalmazás ne a fejlesztő személyes credjével fusson |
 | **Cloud Build** | Buildpacks | Forráskódból image építés deploy-kor | Docker nélküli, egyszerű source deploy |
@@ -491,13 +491,13 @@ cp .env.example .env
 Állítsd be a `.env` fájlban:
 
 ```env
-GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_MODEL=gemini-3.5-flash
 GCP_PROJECT_ID=<a-gcp-projekt-id>
 GEMINI_LOCATION=global
 CORS_ORIGINS=*
 ```
 
-> **Miért `GEMINI_LOCATION=global`?** A `gemini-3.1-flash-lite` modell csak a **global** endpointon érhető el. A Cloud Run továbbra is `europe-west1`-en fut.
+> **Miért `GEMINI_LOCATION=global`?** A `gemini-3.5-flash` hívás a global endpointon megy. A Cloud Run továbbra is `europe-west1`-en fut.
 
 ```bash
 gcloud auth application-default login
@@ -714,7 +714,7 @@ gcloud run deploy contract-analyzer-backend \
   --source . --region europe-west1 --allow-unauthenticated --quiet \
   --service-account "${RUNTIME_SA}" \
   --build-service-account "projects/${GCP_PROJECT_ID}/serviceAccounts/${CICD_SA}" \
-  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${GCP_PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
+  --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${GCP_PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
 
 BACKEND_URL=$(gcloud run services describe contract-analyzer-backend \
   --region europe-west1 --format='value(status.url)')
