@@ -415,7 +415,7 @@ flowchart TB
 
 | Eszköz | Miért kell? |
 |--------|-------------|
-| **Node.js** 20+ | Frontend futtatásához és buildhez |
+| **Node.js** 24.22.1 | Frontend futtatásához és buildhez. A Cloud Run image ugyanezt a verziót telepíti a `frontend/package.json` `engines.node` mezőjéből. A 24-es ág korábbi kiadásaiban sebezhetőség van, a javított LTS a 24.22.1. |
 | **uv** ([telepítés](https://docs.astral.sh/uv/)) | Backend függőségek kezelése |
 | **gcloud CLI** | GCP infrastruktúra (`setup.sh`) és helyi ADC auth |
 | **GCP projekt** | Gemini Enterprise Agent Platform API (`aiplatform.googleapis.com`) + IAM |
