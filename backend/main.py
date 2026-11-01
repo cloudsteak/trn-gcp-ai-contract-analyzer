@@ -1,17 +1,27 @@
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from rag import build_policy_context, build_rag_prompt, get_rag_status, is_rag_available
+from api_trace import (
+    ApiCallTrace,
+    begin_api_traces,
+    clip_text,
+    record_api_call,
+    reset_api_traces,
+    snapshot_api_traces,
+)
+from rag import build_policy_retrieval, build_rag_prompt, get_rag_status, is_rag_available
 
 load_dotenv()
 
@@ -88,6 +98,7 @@ class AnalyzeResponse(AnalysisResult):
     token_usage: TokenUsage
     rag_used: bool = False
     policy_findings: list[PolicyFinding] | None = None
+    api_calls: list[ApiCallTrace] = []  # CSAK AZ API-NÉZET MIATT
 
 
 def _parse_cors_origins(raw: str) -> list[str]:
@@ -156,37 +167,181 @@ def _get_genai_client() -> genai.Client:
     return genai_client
 
 
-async def _analyze_pdf(pdf_bytes: bytes, *, use_rag: bool = False) -> AnalyzeResponse:
-    # A PDF-et nativan adjuk at a Gemini API-nak, szoveg konverzio nelkul
-    client = _get_genai_client()
+def _elapsed_ms(started: float) -> int:
+    return max(0, int((time.perf_counter() - started) * 1000))
 
-    prompt = ANALYSIS_PROMPT
-    rag_active = use_rag and is_rag_available()
 
-    if rag_active:
-        policy_context = build_policy_context()
-        if not policy_context:
-            raise ValueError("Nincs elerheto belso szabalyzat a RAG elemzeshez")
-        prompt = build_rag_prompt(ANALYSIS_PROMPT, policy_context)
-
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=[
-            types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-            prompt,
-        ],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2,
-        ),
+# --- CSAK AZ API-NÉZET MIATT ---
+# A generateContent es a RAG visszakereses olvashato masolata. A hivast nem modositja.
+def _gemini_endpoint() -> str:
+    host = (
+        "aiplatform.googleapis.com"
+        if GEMINI_LOCATION == "global"
+        else f"{GEMINI_LOCATION}-aiplatform.googleapis.com"
+    )
+    return (
+        f"https://{host}/v1/projects/{GCP_PROJECT_ID}/locations/{GEMINI_LOCATION}"
+        f"/publishers/google/models/{GEMINI_MODEL}:generateContent"
     )
 
-    if not response.text:
+
+def _gemini_request(
+    prompt: str,
+    pdf_bytes: bytes,
+    *,
+    file_name: str,
+    rag_active: bool,
+) -> dict[str, Any]:
+    return {
+        "method": "POST",
+        "endpoint": _gemini_endpoint(),
+        "model": GEMINI_MODEL,
+        "file_name": file_name,
+        "rag_used": rag_active,
+        "prompt_chars": len(prompt),
+        "config": {
+            "response_mime_type": "application/json",
+            "temperature": 0.2,
+        },
+        "contents": [
+            {
+                "type": "inline_data",
+                "mime_type": "application/pdf",
+                "file_name": file_name,
+                "size_bytes": len(pdf_bytes),
+            },
+            {"type": "text", "text": clip_text(prompt, 6000)},
+        ],
+    }
+
+
+def _response_body_from_text(response_text: str) -> dict[str, Any]:
+    try:
+        return {"body": json.loads(response_text)}
+    except json.JSONDecodeError:
+        return {"body": clip_text(response_text, 8000)}
+
+
+def _gemini_response_body(
+    response_text: str,
+    response: types.GenerateContentResponse,
+) -> dict[str, Any]:
+    body = _response_body_from_text(response_text)
+    body["token_usage"] = _extract_token_usage(response).model_dump()
+    return body
+
+
+def _trace_error(status_code: int, message: str) -> JSONResponse:
+    """Hiba válasz, a már rögzített RAG és Gemini hívásokkal."""
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "detail": message,
+            "api_calls": [trace.model_dump() for trace in snapshot_api_traces()],
+        },
+    )
+
+
+# --- API-NÉZET VÉGE ---
+
+
+def _retrieve_policy_prompt(file_name: str) -> str:
+    started = time.perf_counter()
+    retrieval = build_policy_retrieval()
+    request = {**retrieval.request, "file_name": file_name}
+    if not retrieval.context:
+        record_api_call(
+            service="RAG",
+            operation="retrievePolicies",
+            status="error",
+            duration_ms=_elapsed_ms(started),
+            request=request,
+            response=retrieval.response,
+            error="Nincs elérhető belső szabályzat a RAG elemzéshez",
+        )
+        raise ValueError("Nincs elerheto belso szabalyzat a RAG elemzeshez")
+
+    record_api_call(
+        service="RAG",
+        operation="retrievePolicies",
+        status="ok",
+        duration_ms=_elapsed_ms(started),
+        request=request,
+        response=retrieval.response,
+    )
+    return build_rag_prompt(ANALYSIS_PROMPT, retrieval.context)
+
+
+def _generate_analysis(
+    pdf_bytes: bytes,
+    prompt: str,
+    *,
+    file_name: str,
+    rag_active: bool,
+) -> AnalyzeResponse:
+    request = _gemini_request(prompt, pdf_bytes, file_name=file_name, rag_active=rag_active)
+    started = time.perf_counter()
+    try:
+        client = _get_genai_client()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                prompt,
+            ],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+            ),
+        )
+    except Exception as exc:
+        record_api_call(
+            service="Gemini",
+            operation="generateContent",
+            status="error",
+            duration_ms=_elapsed_ms(started),
+            request=request,
+            error=str(exc),
+        )
+        raise
+
+    response_text = response.text or ""
+    duration_ms = _elapsed_ms(started)
+    if not response_text:
+        record_api_call(
+            service="Gemini",
+            operation="generateContent",
+            status="error",
+            duration_ms=duration_ms,
+            request=request,
+            error="A Gemini üres választ adott vissza",
+        )
         raise ValueError("A Gemini üres választ adott vissza")
 
-    analysis, policy_findings = _parse_analysis_response(
-        response.text,
-        include_policy_findings=rag_active,
+    try:
+        analysis, policy_findings = _parse_analysis_response(
+            response_text,
+            include_policy_findings=rag_active,
+        )
+    except ValueError as exc:
+        record_api_call(
+            service="Gemini",
+            operation="generateContent",
+            status="error",
+            duration_ms=duration_ms,
+            request=request,
+            response=_response_body_from_text(response_text),
+            error=str(exc),
+        )
+        raise
+
+    record_api_call(
+        service="Gemini",
+        operation="generateContent",
+        status="ok",
+        duration_ms=duration_ms,
+        request=request,
+        response=_gemini_response_body(response_text, response),
     )
     # RagAnalysisPayload tartalmaz policy_findings mezot is, duplikalt kwargs elkerulese
     return AnalyzeResponse(
@@ -194,6 +349,28 @@ async def _analyze_pdf(pdf_bytes: bytes, *, use_rag: bool = False) -> AnalyzeRes
         token_usage=_extract_token_usage(response),
         rag_used=rag_active,
         policy_findings=policy_findings,
+        api_calls=snapshot_api_traces(),
+    )
+
+
+async def _analyze_pdf(
+    pdf_bytes: bytes,
+    *,
+    use_rag: bool = False,
+    file_name: str = "",
+) -> AnalyzeResponse:
+    # A PDF-et nativan adjuk at a Gemini API-nak, szoveg konverzio nelkul
+    prompt = ANALYSIS_PROMPT
+    rag_active = use_rag and is_rag_available()
+
+    if rag_active:
+        prompt = _retrieve_policy_prompt(file_name)
+
+    return _generate_analysis(
+        pdf_bytes,
+        prompt,
+        file_name=file_name,
+        rag_active=rag_active,
     )
 
 
@@ -227,7 +404,7 @@ async def rag_status() -> dict[str, object]:
 async def analyze(
     file: UploadFile = File(...),
     use_rag: bool = Form(False),
-) -> AnalyzeResponse:
+) -> AnalyzeResponse | JSONResponse:
     if file.content_type not in ("application/pdf", "application/x-pdf"):
         raise HTTPException(status_code=400, detail="Csak PDF fájl támogatott")
 
@@ -245,16 +422,21 @@ async def analyze(
             detail="A RAG modul nincs engedelyezve vagy nincs szabalyzat betoltve",
         )
 
+    # CSAK AZ API-NÉZET MIATT – a napló az elemzés végén a válaszba kerül
+    token = begin_api_traces()
     try:
-        return await _analyze_pdf(pdf_bytes, use_rag=use_rag)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except ValueError as exc:
-        logger.exception("Failed to parse Gemini response")
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Contract analysis failed")
-        raise HTTPException(status_code=500, detail="A szerződés elemzése sikertelen") from exc
+        try:
+            return await _analyze_pdf(pdf_bytes, use_rag=use_rag, file_name=file.filename or "")
+        except RuntimeError as exc:
+            return _trace_error(503, str(exc))
+        except ValueError as exc:
+            logger.exception("Failed to parse Gemini response")
+            return _trace_error(502, str(exc))
+        except Exception:
+            logger.exception("Contract analysis failed")
+            return _trace_error(500, "A szerződés elemzése sikertelen")
+    finally:
+        reset_api_traces(token)
 
 
 if __name__ == "__main__":
