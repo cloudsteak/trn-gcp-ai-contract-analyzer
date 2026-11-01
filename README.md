@@ -310,6 +310,7 @@ flowchart TB
     subgraph L5["5. CI/CD · GitHub Actions"]
         direction LR
         Lint["✅ lint.yml<br/>PR · ruff · eslint"]
+        UI["🖼️ ui.yml<br/>PR · Playwright · képernyőképek"]
         Deploy["🚀 deploy.yml<br/>main · Cloud Run"]
     end
 
@@ -326,6 +327,7 @@ flowchart TB
 
     GH --> Deploy
     Lint -.->|"PR ellenőrzés"| GH
+    UI -.->|"PR · képernyőképek"| GH
     Deploy --> CB
     CB --> FE
     CB --> BE
@@ -344,11 +346,11 @@ flowchart TB
     class GEAP ai
     class SA security
     class CB,GH infra
-    class Lint,Deploy cicd
+    class Lint,Deploy,UI cicd
 
     linkStyle 0,1,2,3,4,5 stroke:#2563EB,stroke-width:3px
     linkStyle 6,7,8 stroke:#94A3B8,stroke-width:1px,stroke-dasharray:5
-    linkStyle 9,10,11,12 stroke:#E11D48,stroke-width:2px
+    linkStyle 9,10,11,12,13 stroke:#E11D48,stroke-width:2px
 
     style L1 fill:#EFF6FF,stroke:#BFDBFE,stroke-width:2px
     style L2 fill:#F0FDF4,stroke:#BBF7D0,stroke-width:2px
@@ -369,7 +371,7 @@ flowchart TB
 | **Cloud Run** | Source deploy | Skálázható futtatás HTTPS-sel | Serverless – nincs szerver üzemeltetés |
 | **Service Account** | `contract-analyzer-sa` | ADC auth, IAM jogosultságok | Az alkalmazás ne a fejlesztő személyes credjével fusson |
 | **Cloud Build** | Buildpacks | Forráskódból image építés deploy-kor | Docker nélküli, egyszerű source deploy |
-| **GitHub Actions** | `lint.yml`, `deploy.yml` | Lint PR-en, deploy `main`-en | Reprodukálható CI/CD, nem kézi lépés |
+| **GitHub Actions** | `lint.yml`, `ui.yml`, `deploy.yml` | Lint és böngészős UI teszt PR-en, deploy `main`-en | Reprodukálható CI/CD, nem kézi lépés |
 
 ### API végpontok
 
@@ -460,8 +462,9 @@ flowchart LR
 | GitHub Secrets | `scripts/setup-github.sh` | Repository secrets (`gh` CLI) | Egyszer, `setup-wif.sh` után |
 | Alkalmazás kód (backend + frontend) | **GitHub Actions** `deploy.yml` | Forráskód → Cloud Run (source deploy) | Minden `main` push |
 | Lint ellenőrzés | GitHub Actions `lint.yml` | Kódminőség PR-en | Minden pull request |
+| UI teszt | GitHub Actions `ui.yml` | Playwright a frontenden, képernyőképek a PR kommentben | Pull request, ha a frontend változik |
 | Demo törlése (GCP) | `scripts/teardown.sh` → `teardown-wif.sh` | Cloud Run, runtime SA, WIF, CI/CD SA | Demo újraindításkor |
-| Demo törlése (GitHub) | `scripts/teardown-github.sh` | Repository secrets, pipeline workflow run history (`deploy.yml`, `lint.yml`) | `teardown-wif.sh` után |
+| Demo törlése (GitHub) | `scripts/teardown-github.sh` | Repository secrets, pipeline workflow run history (`deploy.yml`, `lint.yml`, `ui.yml`) | `teardown-wif.sh` után |
 | Manuális `gcloud run deploy` | *(lásd lent)* | Ugyanaz, amit a CI is csinál | **Csak kivételes esetben** |
 
 > **Fontos:** A Cloud Run-ra való telepítés **alapértelmezetten a GitHub Actions-szel történik**. A `setup.sh` csak az infrastruktúrát készíti elő.
@@ -473,7 +476,7 @@ flowchart LR
 - **Gyorsabb iteráció** – nincs Cloud Build várakozás, azonnali reload.
 - **Olcsóbb** – fejlesztés közben nem fut Cloud Run.
 - **Könnyebb hibakeresés** – logok a terminálban.
-- **CI előtti ellenőrzés** – amit helyben lefuttatsz, azt a PR-en is lefuttatja a `lint.yml`.
+- **CI előtti ellenőrzés** – amit helyben lefuttatsz, azt a PR-en is lefuttatja a `lint.yml` és a `ui.yml`.
 
 #### Miért a backenddel kezdünk?
 
@@ -551,6 +554,19 @@ cd backend && uv sync --group dev && uv run ruff check .
 cd frontend && npm install && npm run lint && npm run build
 ```
 
+#### 4. UI tesztek
+
+A Playwright a Vite dev szervert indítja, a backendet mockolja, és képernyőképeket ment a `frontend/test-results/screenshots` mappába. Gemini és RAG hívás nincs.
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium
+npm run test:ui
+```
+
+Pull requesten ugyanez a `ui.yml`. A képek felkerülnek a `ui-screenshots` ágra, és a workflow kommentben megjelennek a PR-en.
+
 ### GCP telepítés és tesztelés
 
 > **Gyors útmutató:** A lépések rövid összefoglalója a [Gcloud telepítés](#gcloud-telepítés) szekcióban.
@@ -608,7 +624,7 @@ export GITHUB_REPO=<szervezet>/<repo-nev>   # opcionális, ha a repo gyökeréb�
 
 A script a GCP-ből számolja ki a WIF provider és CI/CD SA értékeket. A végén megjelenik a beállítandó secrets listája és a kérdés: `Folytatod a beallitast? [y/N]` → nyomj **`y`**, Enter.
 
-Manuális beállítás is lehetséges (Settings → Secrets and variables → Actions). A demo végén a [`teardown-github.sh`](#6-erőforrások-törlése-demo-újraindítás) törli a secrets-eket és kiüríti a pipeline (`deploy.yml`, `lint.yml`) workflow run history-t.
+Manuális beállítás is lehetséges (Settings → Secrets and variables → Actions). A demo végén a [`teardown-github.sh`](#6-erőforrások-törlése-demo-újraindítás) törli a secrets-eket és kiüríti a pipeline (`deploy.yml`, `lint.yml`, `ui.yml`) workflow run history-t.
 
 **GitHub Secrets:**
 
@@ -687,7 +703,7 @@ A script **csak a létező** értékeket törli (idempotens). A `--yes` kapcsol�
 | Mit töröl / ürít? | Részletek |
 |-------------------|-----------|
 | GitHub Actions secrets | A `setup-github.sh` által beállított értékek (lásd lent) |
-| Pipeline workflow run history | A `deploy.yml` és `lint.yml` workflow-k összes futtatása |
+| Pipeline workflow run history | A `deploy.yml`, `lint.yml` és `ui.yml` workflow-k összes futtatása |
 
 **Törölt GitHub Secrets:**
 
@@ -734,6 +750,7 @@ gcloud run deploy contract-analyzer-frontend \
 | Réteg | Állapot | Megjegyzés |
 |-------|---------|------------|
 | Frontend build + lint | ✅ | Független a GCP-től |
+| Frontend UI teszt | ✅ | Playwright, mockolt API, GCP nélkül |
 | Backend lint | ✅ | Független a GCP-től |
 | `/health` helyben | ✅ | GCP konfiguráció nélkül is |
 | `/analyze` helyben | ⚠️ GCP kell | ADC + Gemini API |
@@ -747,7 +764,7 @@ trn-gcp-ai-contract-analyzer/
 │   └── policies/      # RAG szabalyzat fajlok (.md, .txt)
 ├── frontend/          # React + Vite UI
 ├── scripts/           # setup.sh, setup-wif.sh, setup-github.sh, teardown*.sh
-├── .github/workflows/ # lint.yml, deploy.yml
+├── .github/workflows/ # lint.yml, ui.yml, deploy.yml
 └── CLAUDE.md          # Fejlesztési specifikáció
 ```
 

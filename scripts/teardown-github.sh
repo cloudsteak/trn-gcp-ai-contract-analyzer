@@ -14,10 +14,11 @@ GITHUB_SECRETS=(
   GCP_SERVICE_ACCOUNT
 )
 
-# A CI/CD pipeline workflow-k (deploy + lint)
+# A CI/CD pipeline workflow-k (deploy + lint + ui)
 GITHUB_WORKFLOWS=(
   deploy.yml
   lint.yml
+  ui.yml
 )
 
 usage() {
@@ -27,7 +28,7 @@ Hasznalat:
   ./scripts/teardown-github.sh [--yes]
 
 Torli a setup-github.sh altal beallitott GitHub Actions secrets ertekeket,
-es uriteti a pipeline (deploy + lint) workflow run history-t.
+es uriteti a pipeline (deploy + lint + ui) workflow run history-t.
 
 Elofeltetelek:
   - gh CLI telepitve es bejelentkezve (gh auth login)
