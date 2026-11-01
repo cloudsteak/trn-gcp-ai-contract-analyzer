@@ -216,7 +216,7 @@ A [Google AI Studio](https://aistudio.google.com) fejlesztői felületen ugyanaz
 
 1. Nyisd meg: [https://aistudio.google.com](https://aistudio.google.com)
 2. Hozz létre egy **Playground** / **Chat** promptot.
-3. Válassz modellt (pl. `gemini-3.1-flash-lite` vagy más elérhető Gemini 3 verzió).
+3. Válassz modellt (pl. `gemini-3.5-flash` vagy más elérhető Gemini 3 verzió).
 4. Csatold a PDF szerződést (Upload file, vagy Drive integráció ha elérhető).
 5. Illeszd be a [2. szekció promptját](#elemzési-prompt).
 6. Futtasd, és értékeld a választ.
@@ -251,7 +251,7 @@ flowchart TB
     BE["⚙️ Backend<br/>FastAPI"]
 
     subgraph GCP["☁️ Google Cloud Platform"]
-        Gemini["🤖 Gemini modell<br/>gemini-3.1-flash-lite"]
+        Gemini["🤖 Gemini modell<br/>gemini-3.5-flash"]
     end
 
     User ==>|"PDF feltöltés"| FE
@@ -297,7 +297,7 @@ flowchart TB
 
     subgraph L3["3. AI réteg · Gemini Enterprise Agent Platform"]
         direction TB
-        GEAP["🤖 gemini-3.1-flash-lite<br/>global endpoint · JSON válasz"]
+        GEAP["🤖 gemini-3.5-flash<br/>global endpoint · JSON válasz"]
         SA["🔐 contract-analyzer-sa<br/>ADC · roles/aiplatform.user"]
     end
 
@@ -310,6 +310,7 @@ flowchart TB
     subgraph L5["5. CI/CD · GitHub Actions"]
         direction LR
         Lint["✅ lint.yml<br/>PR · ruff · eslint"]
+        UI["🖼️ ui.yml<br/>PR · Playwright · képernyőképek"]
         Deploy["🚀 deploy.yml<br/>main · Cloud Run"]
     end
 
@@ -326,6 +327,7 @@ flowchart TB
 
     GH --> Deploy
     Lint -.->|"PR ellenőrzés"| GH
+    UI -.->|"PR · képernyőképek"| GH
     Deploy --> CB
     CB --> FE
     CB --> BE
@@ -344,11 +346,11 @@ flowchart TB
     class GEAP ai
     class SA security
     class CB,GH infra
-    class Lint,Deploy cicd
+    class Lint,Deploy,UI cicd
 
     linkStyle 0,1,2,3,4,5 stroke:#2563EB,stroke-width:3px
     linkStyle 6,7,8 stroke:#94A3B8,stroke-width:1px,stroke-dasharray:5
-    linkStyle 9,10,11,12 stroke:#E11D48,stroke-width:2px
+    linkStyle 9,10,11,12,13 stroke:#E11D48,stroke-width:2px
 
     style L1 fill:#EFF6FF,stroke:#BFDBFE,stroke-width:2px
     style L2 fill:#F0FDF4,stroke:#BBF7D0,stroke-width:2px
@@ -365,11 +367,11 @@ flowchart TB
 |-----------|-------------|------------|--------------|
 | **Frontend** | React, Vite, `serve` | PDF feltöltés, elemzés, megfelelőségi skála, eredmények, token statisztika | Csak UI – nem tartalmaz üzleti logikát vagy AI hívást |
 | **Backend** | FastAPI, uvicorn, `google-genai` | PDF fogadása, Gemini hívás, JSON validálás | Az AI integráció és adatfeldolgozás egy helyen, biztonságosan |
-| **Gemini Enterprise Agent Platform** | `gemini-3.1-flash-lite` | Szerződés elemzése magyar JSON-nal | Managed AI – nem kell saját modellt futtatni |
+| **Gemini Enterprise Agent Platform** | `gemini-3.5-flash` | Szerződés elemzése magyar JSON-nal | Managed AI – nem kell saját modellt futtatni |
 | **Cloud Run** | Source deploy | Skálázható futtatás HTTPS-sel | Serverless – nincs szerver üzemeltetés |
 | **Service Account** | `contract-analyzer-sa` | ADC auth, IAM jogosultságok | Az alkalmazás ne a fejlesztő személyes credjével fusson |
 | **Cloud Build** | Buildpacks | Forráskódból image építés deploy-kor | Docker nélküli, egyszerű source deploy |
-| **GitHub Actions** | `lint.yml`, `deploy.yml` | Lint PR-en, deploy `main`-en | Reprodukálható CI/CD, nem kézi lépés |
+| **GitHub Actions** | `lint.yml`, `ui.yml`, `deploy.yml` | Lint és böngészős UI teszt PR-en, deploy `main`-en | Reprodukálható CI/CD, nem kézi lépés |
 
 ### API végpontok
 
@@ -415,7 +417,7 @@ flowchart TB
 
 | Eszköz | Miért kell? |
 |--------|-------------|
-| **Node.js** 20+ | Frontend futtatásához és buildhez |
+| **Node.js** 24.22.1 | Frontend futtatásához és buildhez. A Cloud Run image ugyanezt a verziót telepíti a `frontend/package.json` `engines.node` mezőjéből. A 24-es ág korábbi kiadásaiban sebezhetőség van, a javított LTS a 24.22.1. |
 | **uv** ([telepítés](https://docs.astral.sh/uv/)) | Backend függőségek kezelése |
 | **gcloud CLI** | GCP infrastruktúra (`setup.sh`) és helyi ADC auth |
 | **GCP projekt** | Gemini Enterprise Agent Platform API (`aiplatform.googleapis.com`) + IAM |
@@ -460,8 +462,9 @@ flowchart LR
 | GitHub Secrets | `scripts/setup-github.sh` | Repository secrets (`gh` CLI) | Egyszer, `setup-wif.sh` után |
 | Alkalmazás kód (backend + frontend) | **GitHub Actions** `deploy.yml` | Forráskód → Cloud Run (source deploy) | Minden `main` push |
 | Lint ellenőrzés | GitHub Actions `lint.yml` | Kódminőség PR-en | Minden pull request |
+| UI teszt | GitHub Actions `ui.yml` | Playwright a frontenden, képernyőképek a PR kommentben | Pull request, ha a frontend változik |
 | Demo törlése (GCP) | `scripts/teardown.sh` → `teardown-wif.sh` | Cloud Run, runtime SA, WIF, CI/CD SA | Demo újraindításkor |
-| Demo törlése (GitHub) | `scripts/teardown-github.sh` | Repository secrets, pipeline workflow run history (`deploy.yml`, `lint.yml`) | `teardown-wif.sh` után |
+| Demo törlése (GitHub) | `scripts/teardown-github.sh` | Repository secrets, pipeline workflow run history (`deploy.yml`, `lint.yml`, `ui.yml`) | `teardown-wif.sh` után |
 | Manuális `gcloud run deploy` | *(lásd lent)* | Ugyanaz, amit a CI is csinál | **Csak kivételes esetben** |
 
 > **Fontos:** A Cloud Run-ra való telepítés **alapértelmezetten a GitHub Actions-szel történik**. A `setup.sh` csak az infrastruktúrát készíti elő.
@@ -473,7 +476,7 @@ flowchart LR
 - **Gyorsabb iteráció** – nincs Cloud Build várakozás, azonnali reload.
 - **Olcsóbb** – fejlesztés közben nem fut Cloud Run.
 - **Könnyebb hibakeresés** – logok a terminálban.
-- **CI előtti ellenőrzés** – amit helyben lefuttatsz, azt a PR-en is lefuttatja a `lint.yml`.
+- **CI előtti ellenőrzés** – amit helyben lefuttatsz, azt a PR-en is lefuttatja a `lint.yml` és a `ui.yml`.
 
 #### Miért a backenddel kezdünk?
 
@@ -491,13 +494,13 @@ cp .env.example .env
 Állítsd be a `.env` fájlban:
 
 ```env
-GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_MODEL=gemini-3.5-flash
 GCP_PROJECT_ID=<a-gcp-projekt-id>
 GEMINI_LOCATION=global
 CORS_ORIGINS=*
 ```
 
-> **Miért `GEMINI_LOCATION=global`?** A `gemini-3.1-flash-lite` modell csak a **global** endpointon érhető el. A Cloud Run továbbra is `europe-west1`-en fut.
+> **Miért `GEMINI_LOCATION=global`?** A `gemini-3.5-flash` hívás a global endpointon megy. A Cloud Run továbbra is `europe-west1`-en fut.
 
 ```bash
 gcloud auth application-default login
@@ -550,6 +553,19 @@ Nyisd meg: [http://localhost:5173](http://localhost:5173)
 cd backend && uv sync --group dev && uv run ruff check .
 cd frontend && npm install && npm run lint && npm run build
 ```
+
+#### 4. UI tesztek
+
+A Playwright a Vite dev szervert indítja, a backendet mockolja, és képernyőképeket ment a `frontend/test-results/screenshots` mappába. Gemini és RAG hívás nincs.
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium
+npm run test:ui
+```
+
+Pull requesten ugyanez a `ui.yml`. A képek felkerülnek a `ui-screenshots` ágra, és a workflow kommentben megjelennek a PR-en.
 
 ### GCP telepítés és tesztelés
 
@@ -608,7 +624,7 @@ export GITHUB_REPO=<szervezet>/<repo-nev>   # opcionális, ha a repo gyökeréb�
 
 A script a GCP-ből számolja ki a WIF provider és CI/CD SA értékeket. A végén megjelenik a beállítandó secrets listája és a kérdés: `Folytatod a beallitast? [y/N]` → nyomj **`y`**, Enter.
 
-Manuális beállítás is lehetséges (Settings → Secrets and variables → Actions). A demo végén a [`teardown-github.sh`](#6-erőforrások-törlése-demo-újraindítás) törli a secrets-eket és kiüríti a pipeline (`deploy.yml`, `lint.yml`) workflow run history-t.
+Manuális beállítás is lehetséges (Settings → Secrets and variables → Actions). A demo végén a [`teardown-github.sh`](#6-erőforrások-törlése-demo-újraindítás) törli a secrets-eket és kiüríti a pipeline (`deploy.yml`, `lint.yml`, `ui.yml`) workflow run history-t.
 
 **GitHub Secrets:**
 
@@ -687,7 +703,7 @@ A script **csak a létező** értékeket törli (idempotens). A `--yes` kapcsol�
 | Mit töröl / ürít? | Részletek |
 |-------------------|-----------|
 | GitHub Actions secrets | A `setup-github.sh` által beállított értékek (lásd lent) |
-| Pipeline workflow run history | A `deploy.yml` és `lint.yml` workflow-k összes futtatása |
+| Pipeline workflow run history | A `deploy.yml`, `lint.yml` és `ui.yml` workflow-k összes futtatása |
 
 **Törölt GitHub Secrets:**
 
@@ -714,7 +730,7 @@ gcloud run deploy contract-analyzer-backend \
   --source . --region europe-west1 --allow-unauthenticated --quiet \
   --service-account "${RUNTIME_SA}" \
   --build-service-account "projects/${GCP_PROJECT_ID}/serviceAccounts/${CICD_SA}" \
-  --set-env-vars="GEMINI_MODEL=gemini-3.1-flash-lite,GCP_PROJECT_ID=${GCP_PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
+  --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${GCP_PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
 
 BACKEND_URL=$(gcloud run services describe contract-analyzer-backend \
   --region europe-west1 --format='value(status.url)')
@@ -734,6 +750,7 @@ gcloud run deploy contract-analyzer-frontend \
 | Réteg | Állapot | Megjegyzés |
 |-------|---------|------------|
 | Frontend build + lint | ✅ | Független a GCP-től |
+| Frontend UI teszt | ✅ | Playwright, mockolt API, GCP nélkül |
 | Backend lint | ✅ | Független a GCP-től |
 | `/health` helyben | ✅ | GCP konfiguráció nélkül is |
 | `/analyze` helyben | ⚠️ GCP kell | ADC + Gemini API |
@@ -747,7 +764,7 @@ trn-gcp-ai-contract-analyzer/
 │   └── policies/      # RAG szabalyzat fajlok (.md, .txt)
 ├── frontend/          # React + Vite UI
 ├── scripts/           # setup.sh, setup-wif.sh, setup-github.sh, teardown*.sh
-├── .github/workflows/ # lint.yml, deploy.yml
+├── .github/workflows/ # lint.yml, ui.yml, deploy.yml
 └── CLAUDE.md          # Fejlesztési specifikáció
 ```
 

@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import ApiTracePanel, { ApiTraceToggle } from "./components/ApiTracePanel.jsx";
+import { useCallLog } from "./hooks/useCallLog.js";
+import { analyzeContract as requestAnalysis, getRagStatus } from "./services/api.js";
 
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+const TRACE_STORAGE_KEY = "showApiCalls";
+// Fejlesztői StrictMode kétszer indítaná az első lekérést.
+let ragStatusRequested = false;
 
 const POLICY_STATUS_LABELS = {
   compliant: "Megfelel",
@@ -44,16 +48,23 @@ function App() {
   const [result, setResult] = useState(null);
   const [ragAvailable, setRagAvailable] = useState(false);
   const [useRag, setUseRag] = useState(false);
+  const apiCalls = useCallLog();
+  const [showApiCalls, setShowApiCalls] = useState(
+    () => sessionStorage.getItem(TRACE_STORAGE_KEY) === "1"
+  );
 
   useEffect(() => {
+    sessionStorage.setItem(TRACE_STORAGE_KEY, showApiCalls ? "1" : "0");
+  }, [showApiCalls]);
+
+  useEffect(() => {
+    if (ragStatusRequested) return undefined;
+    ragStatusRequested = true;
+
     const loadRagStatus = async () => {
       try {
-        const response = await fetch(`${API_URL}/rag/status`);
-        if (!response.ok) {
-          return;
-        }
-        const payload = await response.json();
-        setRagAvailable(Boolean(payload.available));
+        const payload = await getRagStatus();
+        setRagAvailable(Boolean(payload?.available));
       } catch {
         setRagAvailable(false);
       }
@@ -107,26 +118,8 @@ function App() {
     setError("");
     setResult(null);
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
-    formData.append("use_rag", useRag ? "true" : "false");
-
     try {
-      const response = await fetch(`${API_URL}/analyze`, {
-        method: "POST",
-        body: formData,
-      });
-
-      const payload = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        const message =
-          typeof payload.detail === "string"
-            ? payload.detail
-            : "Az elemzés kérése sikertelen.";
-        throw new Error(message);
-      }
-
+      const payload = await requestAnalysis(selectedFile, useRag);
       setResult(payload);
     } catch (requestError) {
       setError(requestError.message || "Váratlan hiba történt az elemzés során.");
@@ -136,12 +129,20 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app${showApiCalls ? " app--trace" : ""}`}>
       <header className="header">
-        <h1>Szerződéselemző</h1>
-        <p>PDF szerződés feltöltése és Gemini-alapú elemzés</p>
+        <div className="header-copy">
+          <h1>Szerződéselemző</h1>
+          <p>PDF szerződés feltöltése és Gemini-alapú elemzés</p>
+        </div>
+        <ApiTraceToggle
+          pressed={showApiCalls}
+          count={apiCalls.length}
+          onToggle={() => setShowApiCalls((open) => !open)}
+        />
       </header>
 
+      <div className="workspace">
       <main className="main">
         <section className="upload-section">
           <div
@@ -349,6 +350,8 @@ function App() {
           </section>
         )}
       </main>
+      {showApiCalls && <ApiTracePanel calls={apiCalls} />}
+      </div>
     </div>
   );
 }

@@ -140,20 +140,79 @@ def _select_chunks(chunks: list[PolicyChunk], max_chars: int) -> list[PolicyChun
     return selected
 
 
-def build_policy_context() -> str:
+@dataclass(frozen=True)
+class PolicyRetrieval:
+    """A promptba kerülő szabályzati szöveg és az oktatási panel másolata."""
+
+    context: str
+    request: dict[str, object]
+    response: dict[str, object]
+
+
+def _snapshot_chunks(chunks: list[PolicyChunk]) -> list[dict[str, object]]:
+    total_chars = sum(len(chunk.content) for chunk in chunks)
+    if total_chars <= 8000:
+        visible = chunks
+        limit = 8000
+    else:
+        visible = chunks[:8]
+        limit = 1500
+
+    items: list[dict[str, object]] = []
+    for chunk in visible:
+        content = chunk.content
+        if len(content) > limit:
+            content = (
+                content[:limit] + f"\n… ({len(chunk.content)} karakterből az első {limit} látható)"
+            )
+        items.append(
+            {
+                "policy": chunk.policy_name,
+                "chars": len(chunk.content),
+                "content": content,
+            }
+        )
+    return items
+
+
+def build_policy_retrieval() -> PolicyRetrieval:
+    """Szabályzatok betöltése, darabolása és a promptba kerülő rész kiválasztása."""
     documents = load_policy_documents()
-    if not documents:
-        return ""
+    all_chunks = _chunk_policy_documents(documents)
+    selected = _select_chunks(all_chunks, RAG_MAX_POLICY_CHARS)
+    context = "\n\n".join(
+        f"### Szabalyzat: {chunk.policy_name}\n{chunk.content}" for chunk in selected
+    )
+    visible_chunks = _snapshot_chunks(selected)
+    response: dict[str, object] = {
+        "policy_count": len(documents),
+        "policy_names": [document.name for document in documents],
+        "chunk_count_total": len(all_chunks),
+        "chunk_count_selected": len(selected),
+        "context_chars": len(context),
+        "selected_chunks": visible_chunks,
+    }
+    if len(visible_chunks) < len(selected):
+        response["omitted_chunks"] = len(selected) - len(visible_chunks)
 
-    chunks = _select_chunks(_chunk_policy_documents(documents), RAG_MAX_POLICY_CHARS)
-    if not chunks:
-        return ""
+    return PolicyRetrieval(
+        context=context,
+        request={
+            "method": "RETRIEVE",
+            "endpoint": "local://policies",
+            "policy_dir": str(resolve_policy_dir()),
+            "max_chars": RAG_MAX_POLICY_CHARS,
+            "chunk_size": RAG_CHUNK_SIZE,
+            "documents": [
+                {"name": document.name, "chars": len(document.content)} for document in documents
+            ],
+        },
+        response=response,
+    )
 
-    sections: list[str] = []
-    for chunk in chunks:
-        sections.append(f"### Szabalyzat: {chunk.policy_name}\n{chunk.content}")
 
-    return "\n\n".join(sections)
+def build_policy_context() -> str:
+    return build_policy_retrieval().context
 
 
 def get_rag_status() -> dict[str, object]:
