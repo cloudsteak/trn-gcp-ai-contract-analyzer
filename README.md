@@ -25,7 +25,7 @@ Gyors útmutató a GCP-re való telepítéshez. Részletek alább a [4. szekció
 
 ```bash
 export GCP_PROJECT_ID=<a-gcp-projekt-id>
-export GCP_REGION=europe-west1
+export GCP_REGION=europe-west4
 export BACKEND_SERVICE=contract-analyzer-backend
 export FRONTEND_SERVICE=contract-analyzer-frontend
 export GITHUB_REPO=<szervezet>/<repo-nev>
@@ -51,7 +51,7 @@ gcloud auth application-default set-quota-project "${GCP_PROJECT_ID}"    # szám
 ./scripts/setup.sh
 ```
 
-A script kiírja a Cloud Run URL-eket.
+A script kiírja a Cloud Run URL-eket. Az `upload-doc-to-rag.sh`-t is lefuttatja: létrehozza a Cloud Storage bucketet, feltölti a `policy/` szabályzatokat, és létrehozza a Vertex RAG corpust. Az indexelés több perc.
 
 ### 5. Workload Identity Federation (WIF) – GitHub Actions hitelesítés
 
@@ -87,32 +87,33 @@ A GitHub Actions automatikusan deployol – pár perc múlva él az alkalmazás.
 
 ### 9. RAG – belső szabályzatokkal összevetés
 
-A RAG modul alapértelmezetten **be van kapcsolva** – a `setup.sh`, a GitHub Actions deploy és a helyi `.env.example` is `RAG_ENABLED=true` értéket állít. A szerződéseket belső céges szabályzatokkal is össze tudod vetni.
+A RAG modul alapértelmezetten **be van kapcsolva**. A `setup.sh` lefuttatja a `scripts/upload-doc-to-rag.sh`-t, ami:
 
-**1. Szabályzat fájlok**
+1. létrehozza a Cloud Storage bucketet (`contract-analyzer-policy-` és egy 6 jegyű szám, ugyanaz a régió, mint a Cloud Run: `europe-west4`),
+2. feltölti a repó `policy/` mappájában lévő szabályzatokat,
+3. létrehozza a Vertex RAG Engine corpust (`contract-regulations`, embedding: `text-multilingual-embedding-002`, vektor adatbázis: RagManaged Spanner, KNN),
+4. beimportálja a feltöltött fájlokat a corpusba.
 
-Helyezd a belső szabályzatokat (`.md` vagy `.txt`) a `backend/policies/` mappába. A repóban két példa van: `fizetesi-feltetelek.md`, `adatvedelem.md` – cseréld le vagy egészítsd ki a saját szabályzataiddal.
+Az `upload-doc-to-rag.sh` nem külön telepítési lépés. A `setup.sh` hívja, ezért első telepítéskor nem kell külön futtatni. Csak később, ha a `policy/` mappában új vagy módosított szabályzat van: a változatlan fájlt az import kihagyja, a módosultat újraindexeli. Ilyenkor a `setup.sh`-t, a WIF-et és a GitHub scriptet nem kell újra futtatni.
 
-**2. Deploy a szabályzatokkal**
+```bash
+./scripts/upload-doc-to-rag.sh
+```
 
-Commitold a fájlokat, nyiss PR-t, és merge-eld a `main` branchre – a GitHub Actions source deploy a szabályzatokat is a backend image-be csomagolja.
+A script a végén kiírja a corpus resource nevét (`RAG_CORPUS=...`). Helyi futtatáshoz ezt a `backend/.env` fájlba másold.
 
-**3. Ellenőrzés**
+**Ellenőrzés**
 
 ```bash
 BACKEND_URL=$(gcloud run services describe "${BACKEND_SERVICE}" \
   --region "${GCP_REGION}" --format='value(status.url)')
 curl "${BACKEND_URL}/rag/status"
-# Várható: "enabled": true, "available": true, "policy_count" > 0
+# Várható: "enabled": true, "available": true, es a corpus resource neve
 ```
-
-**4. Használat a felületen**
 
 Ha a RAG elérhető, a frontenden megjelenik a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzet. Jelöld be elemzés előtt – az eredmény tartalmazza a megszokott mezőket **plusz** a `policy_findings` listát (szabályzati megfelelés / figyelmeztetés / sértés). A jelölőnégyzet nélkül sima PDF-elemzés fut.
 
-**5. Kikapcsolás (opcionális)**
-
-Ha nem akarod használni a belső szabályzatok összevetését:
+**Kikapcsolás (opcionális)**
 
 ```bash
 gcloud run services update "${BACKEND_SERVICE}" \
@@ -123,15 +124,16 @@ gcloud run services update "${BACKEND_SERVICE}" \
 | Változó | Alapértelmezés | Jelentés |
 |---------|----------------|----------|
 | `RAG_ENABLED` | `true` | RAG modul elérhető-e a backenden |
-| `RAG_POLICY_DIR` | `policies` | Szabályzat mappa neve a `backend/` alatt |
-| `RAG_MAX_POLICY_CHARS` | `30000` | Max. karakter a promptba injektált szabályzatból |
+| `RAG_CORPUS` | üres | A corpus teljes resource neve |
+| `RAG_LOCATION` | `europe-west4` | RAG Engine régió, ha a corpus név nem tartalmazza. Ugyanaz, mint a Cloud Run régiója |
+| `RAG_TOP_K` | `8` | Hány szabályzat-részlet kerüljön a promptba |
 
 Részletes leírás: [5. szekció – RAG modul](#5-rag-modul--belső-szabályzatokkal-összevetés).
 
 ### 10. Erőforrások törlése (demo újraindítás)
 
 ```bash
-./scripts/teardown.sh
+./scripts/teardown.sh          # Cloud Run, runtime SA, es a teardown-rag.sh
 ./scripts/teardown-wif.sh
 ./scripts/teardown-github.sh   # secrets + pipeline workflow run history
 ```
@@ -285,7 +287,7 @@ flowchart TB
         Browser(["🌐 Böngésző<br/>PDF feltöltés · eredmény megjelenítés"])
     end
 
-    subgraph L2["2. Alkalmazás réteg · Cloud Run · europe-west1"]
+    subgraph L2["2. Alkalmazás réteg · Cloud Run · europe-west4"]
         direction LR
         subgraph CR_FE["Frontend service"]
             FE["🖥️ contract-analyzer-frontend<br/><b>React + Vite + serve</b><br/>Port: 8080"]
@@ -463,7 +465,7 @@ flowchart LR
 | Alkalmazás kód (backend + frontend) | **GitHub Actions** `deploy.yml` | Forráskód → Cloud Run (source deploy) | Minden `main` push |
 | Lint ellenőrzés | GitHub Actions `lint.yml` | Kódminőség PR-en | Minden pull request |
 | UI teszt | GitHub Actions `ui.yml` | Playwright a frontenden, képernyőképek a PR kommentben | Pull request, ha a frontend változik |
-| Demo törlése (GCP) | `scripts/teardown.sh` → `teardown-wif.sh` | Cloud Run, runtime SA, WIF, CI/CD SA | Demo újraindításkor |
+| Demo törlése (GCP) | `scripts/teardown.sh` (benne `teardown-rag.sh`) → `teardown-wif.sh` | Cloud Run, runtime SA, RAG corpus és bucket, WIF, CI/CD SA | Demo újraindításkor |
 | Demo törlése (GitHub) | `scripts/teardown-github.sh` | Repository secrets, pipeline workflow run history (`deploy.yml`, `lint.yml`, `ui.yml`) | `teardown-wif.sh` után |
 | Manuális `gcloud run deploy` | *(lásd lent)* | Ugyanaz, amit a CI is csinál | **Csak kivételes esetben** |
 
@@ -500,7 +502,7 @@ GEMINI_LOCATION=global
 CORS_ORIGINS=*
 ```
 
-> **Miért `GEMINI_LOCATION=global`?** A `gemini-3.5-flash` hívás a global endpointon megy. A Cloud Run továbbra is `europe-west1`-en fut.
+> **Miért `GEMINI_LOCATION=global`?** A `gemini-3.5-flash` hívás a global endpointon megy. A Cloud Run továbbra is `europe-west4`-en fut.
 
 ```bash
 gcloud auth application-default login
@@ -652,11 +654,11 @@ A GitHub Actions automatikusan deployol (pár perc). Követés: **Actions** → 
 
 ```bash
 BACKEND_URL=$(gcloud run services describe contract-analyzer-backend \
-  --region europe-west1 --format='value(status.url)')
+  --region europe-west4 --format='value(status.url)')
 curl "${BACKEND_URL}/health"
 
 FRONTEND_URL=$(gcloud run services describe contract-analyzer-frontend \
-  --region europe-west1 --format='value(status.url)')
+  --region europe-west4 --format='value(status.url)')
 echo "Nyisd meg: ${FRONTEND_URL}"
 ```
 
@@ -666,7 +668,7 @@ A setup lépések **fordított sorrendben** futtatandók: először a GCP runtim
 
 ```mermaid
 flowchart LR
-    T1["1. teardown.sh<br/>Cloud Run, runtime SA"] --> T2["2. teardown-wif.sh<br/>Workload Identity Federation (WIF)"]
+    T1["1. teardown.sh<br/>teardown-rag.sh, Cloud Run, runtime SA"] --> T2["2. teardown-wif.sh<br/>Workload Identity Federation (WIF)"]
     T2 --> T3["3. teardown-github.sh<br/>GitHub secrets + workflow runs"]
 ```
 
@@ -681,7 +683,8 @@ export GITHUB_REPO=<szervezet>/<repo-nev>
 
 | Script | Mit töröl? |
 |--------|------------|
-| `teardown.sh` | Cloud Run service-ek, runtime service account (`contract-analyzer-sa`) |
+| `teardown.sh` | Cloud Run service-ek, runtime service account (`contract-analyzer-sa`). Lefuttatja a `teardown-rag.sh`-t |
+| `teardown-rag.sh` | RAG corpus, szabályzat bucket, ranker jog. Önállóan is futtatható |
 | `teardown-wif.sh` | WIF pool + provider, CI/CD service account (`contract-analyzer-cicd-sa`), deploy IAM |
 
 **3. GitHub repó beállítások** (`gh` CLI):
@@ -722,22 +725,23 @@ A script **csak a létező** értékeket törli (idempotens). A `--yes` kapcsol�
 
 ```bash
 export GCP_PROJECT_ID=<a-gcp-projekt-id>
+export RAG_CORPUS=<a upload-doc-to-rag.sh altal kiirt corpus resource nev>
 CICD_SA=contract-analyzer-cicd-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 RUNTIME_SA=contract-analyzer-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 
 cd backend
 gcloud run deploy contract-analyzer-backend \
-  --source . --region europe-west1 --allow-unauthenticated --quiet \
+  --source . --region europe-west4 --allow-unauthenticated --quiet \
   --service-account "${RUNTIME_SA}" \
   --build-service-account "projects/${GCP_PROJECT_ID}/serviceAccounts/${CICD_SA}" \
-  --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${GCP_PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*"
+  --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${GCP_PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*,RAG_ENABLED=true,RAG_CORPUS=${RAG_CORPUS}"
 
 BACKEND_URL=$(gcloud run services describe contract-analyzer-backend \
-  --region europe-west1 --format='value(status.url)')
+  --region europe-west4 --format='value(status.url)')
 
 cd ../frontend
 gcloud run deploy contract-analyzer-frontend \
-  --source . --region europe-west1 --allow-unauthenticated --quiet \
+  --source . --region europe-west4 --allow-unauthenticated --quiet \
   --service-account "${RUNTIME_SA}" \
   --build-service-account "projects/${GCP_PROJECT_ID}/serviceAccounts/${CICD_SA}" \
   --set-build-env-vars="VITE_API_URL=${BACKEND_URL}"
@@ -753,7 +757,7 @@ gcloud run deploy contract-analyzer-frontend \
 | Frontend UI teszt | ✅ | Playwright, mockolt API, GCP nélkül |
 | Backend lint | ✅ | Független a GCP-től |
 | `/health` helyben | ✅ | GCP konfiguráció nélkül is |
-| `/analyze` helyben | ⚠️ GCP kell | ADC + Gemini API |
+| `/analyze` helyben | ⚠️ GCP kell | ADC + Gemini API; RAG-hez a `RAG_CORPUS` is |
 | GCP deploy | ⚠️ CI-vel | `setup.sh` + `setup-wif.sh` + `setup-github.sh` + PR merge `main`-re |
 
 ### Projekt struktúra
@@ -761,9 +765,9 @@ gcloud run deploy contract-analyzer-frontend \
 ```
 trn-gcp-ai-contract-analyzer/
 ├── backend/           # FastAPI backend (main.py, rag.py, dev.sh, pyproject.toml)
-│   └── policies/      # RAG szabalyzat fajlok (.md, .txt)
+├── policy/            # RAG forras szabalyzatok (.md, .txt, .pdf) – a upload-doc-to-rag.sh tolti fel
 ├── frontend/          # React + Vite UI
-├── scripts/           # setup.sh, setup-wif.sh, setup-github.sh, teardown*.sh
+├── scripts/           # setup.sh, upload-doc-to-rag.sh, setup-wif.sh, setup-github.sh, teardown*.sh
 ├── .github/workflows/ # lint.yml, ui.yml, deploy.yml
 └── CLAUDE.md          # Fejlesztési specifikáció
 ```
@@ -772,15 +776,15 @@ trn-gcp-ai-contract-analyzer/
 
 ## 5. RAG modul – belső szabályzatokkal összevetés
 
-A [4. szekció](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással) felhő alapú megoldás egy egyszerű **RAG** (Retrieval Augmented Generation) modullal egészíthető ki: a feltöltött szerződést a cég belső szabályzataival is összeveti a Gemini.
+A [4. szekció](#4-szerződés-elemzés-skálázható-felhő-alapú-megoldással) felhő alapú megoldás a szerződést a cég belső szabályzataival is összeveti. A szabályzatok a **Vertex RAG Engine** corpusában vannak (embedding + RagManaged Spanner). Elemzéskor a backend a szerződés szövegével keres, a talált részleteket a Gemini promptjába teszi.
 
-> **Alapértelmezetten bekapcsolva.** A `setup.sh`, a GitHub Actions deploy (`deploy.yml`) és a `backend/.env.example` mind `RAG_ENABLED=true` értéket állít. Ha nem akarod használni, állítsd `RAG_ENABLED=false`-ra – az alkalmazás sima PDF-elemzést végez, ugyanazzal az API-val és UI-val.
+> **Alapértelmezetten bekapcsolva.** A `setup.sh` létrehozza a corpust, a GitHub Actions deploy a `contract-regulations` display nevű corpust keresi meg, a `backend/.env.example` pedig `RAG_ENABLED=true` értéket állít. Ha nem akarod használni, állítsd `RAG_ENABLED=false`-ra.
 
 ### Mit csinál?
 
-1. A `backend/policies/` mappába `.md` vagy `.txt` szabályzat fájlokat helyezel (pl. fizetési feltételek, adatvédelem).
-2. A backend betölti és darabokra bontja a szabályzatokat.
-3. Elemzéskor – ha bekapcsolod a RAG kapcsolót – a releváns szabályzati részek bekerülnek a promptba a PDF mellett.
+1. A `policy/` mappában vannak a szabályzatok (`.md`, `.txt` vagy `.pdf`). A `setup.sh` által hívott `scripts/upload-doc-to-rag.sh` feltölti őket egy Cloud Storage bucketbe, és importálja a corpusba.
+2. Elemzéskor – ha bekapcsolod a RAG kapcsolót – a backend kinyeri a PDF szövegét, és ezzel hívja a RAG Engine `retrieveContexts` műveletét.
+3. A visszakapott szabályzat-részletek bekerülnek a promptba a PDF mellett.
 4. A válasz tartalmazza a megszokott mezőket **plusz** egy `policy_findings` listát: melyik szabályzatra vonatkozóan megfelel, figyelmeztet vagy sértés.
 
 A prompt kiegészítése a [`backend/rag.py`](backend/rag.py) fájlban van (`RAG_PROMPT_EXTENSION`); az alap elemzési prompt továbbra is a [`backend/main.py`](backend/main.py) `ANALYSIS_PROMPT` konstans.
@@ -790,70 +794,64 @@ A prompt kiegészítése a [`backend/rag.py`](backend/rag.py) fájlban van (`RAG
 ```mermaid
 flowchart LR
     PDF["📄 Szerződés PDF"]
-    POL["📋 Belső szabályzatok<br/>policies/*.md"]
-    RAG["🔍 RAG modul<br/>backend/rag.py"]
+    POL["📋 policy/"]
+    GCS["Cloud Storage"]
+    CORPUS["RAG Engine corpus<br/>europe-west4"]
     BE["⚙️ Backend"]
     GEM["🤖 Gemini"]
 
+    POL --> GCS --> CORPUS
     PDF --> BE
-    POL --> RAG
-    RAG -->|"szabályzati kontextus"| BE
-    BE -->|"PDF + prompt + szabályzat"| GEM
+    BE -->|"retrieveContexts"| CORPUS
+    CORPUS -->|"szabályzat-részletek"| BE
+    BE -->|"PDF + prompt + részletek"| GEM
     GEM --> BE
 ```
 
-### Konfiguráció
+### Szabályzat frissítése
 
-**1. Környezeti változók** (`backend/.env` vagy Cloud Run):
+Az első corpus a `./scripts/setup.sh` futásakor jön létre, az hívja az `upload-doc-to-rag.sh`-t. Az `upload-doc-to-rag.sh` egyedül a későbbi frissítés: új vagy módosított fájl a `policy/` mappában. A változatlan fájlt az import kihagyja, a módosultat újraindexeli.
+
+```bash
+export GCP_PROJECT_ID=<a-gcp-projekt-id>
+./scripts/upload-doc-to-rag.sh
+```
+
+A script a végén kiírja a `RAG_CORPUS=projects/.../ragCorpora/...` sort. Ezt a Cloud Run környezetébe a `setup.sh` és a deploy is beírja. Helyben a `backend/.env` fájlba kell:
 
 ```env
 RAG_ENABLED=true
-RAG_POLICY_DIR=policies
-RAG_MAX_POLICY_CHARS=30000
+RAG_CORPUS=projects/<projekt>/locations/europe-west4/ragCorpora/<id>
+RAG_LOCATION=europe-west4
+RAG_TOP_K=8
 ```
 
 | Változó | Alapértelmezés | Jelentés |
 |---------|----------------|----------|
 | `RAG_ENABLED` | `true` | RAG modul elérhető-e (`false` = kikapcsolva) |
-| `RAG_POLICY_DIR` | `policies` | Szabályzat fájlok mappája (a `backend/` alatt) |
-| `RAG_MAX_POLICY_CHARS` | `30000` | Max. karakter a promptba injektált szabályzatból |
+| `RAG_CORPUS` | üres | Corpus resource neve. Enélkül a jelölőnégyzet nem jelenik meg |
+| `RAG_LOCATION` | `europe-west4` | RAG Engine régió, ugyanaz, mint a Cloud Run |
+| `RAG_TOP_K` | `8` | Legfeljebb ennyi részlet kerül a promptba |
+| `RAG_RANKER` | `semantic-ranker-default@latest` | A találatok újrarendezése |
+
+A corpus a Cloud Runnal azonos régióban jön létre (`europe-west4`). Az embedding **text-multilingual-embedding-002**, a vektor adatbázis **RagManaged Cloud Spanner**, a keresés **KNN**.
 
 **Kikapcsolás Cloud Run-on:**
 
 ```bash
 gcloud run services update contract-analyzer-backend \
-  --region europe-west1 \
+  --region europe-west4 \
   --update-env-vars="RAG_ENABLED=false"
 ```
 
-**2. Szabályzat fájlok**
+### UI és API
 
-Helyezd a belső szabályzatokat a `backend/policies/` mappába. A repóban két **példa** fájl van:
-
-- `fizetesi-feltetelek.md`
-- `adatvedelem.md`
-
-Cseréld le vagy egészítsd ki a saját céges szabályzataiddal.
-
-**3. UI kapcsoló**
-
-Ha `RAG_ENABLED=true` és van legalább egy szabályzat fájl, a frontend automatikusan megjeleníti a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzetet. Kikapcsolva ugyanaz az elemzés fut, mint RAG nélkül.
-
-**4. API**
+Ha `RAG_ENABLED=true` és a `RAG_CORPUS` be van állítva, a frontend megjeleníti a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzetet.
 
 | Végpont | Leírás |
 |---------|--------|
-| `GET /rag/status` | RAG állapot: `enabled`, `available`, `policy_count`, `policy_names` |
+| `GET /rag/status` | `enabled`, `available`, `corpus`, `location` |
 | `POST /analyze` | Opcionális `use_rag=true` form mező (alapértelmezés: `false`) |
-
-RAG nélküli elemzés (változatlan):
-
-```bash
-curl -X POST http://localhost:8080/analyze \
-  -F "file=@szerzodes.pdf;type=application/pdf"
-```
-
-RAG-gel:
 
 ```bash
 curl -X POST http://localhost:8080/analyze \
@@ -861,53 +859,36 @@ curl -X POST http://localhost:8080/analyze \
   -F "use_rag=true"
 ```
 
-### Cloud Run deploy
-
-A GitHub Actions pipeline (`deploy.yml`) alapértelmezetten **RAG-gel** deployol:
-
-```bash
---set-env-vars="...,RAG_ENABLED=true,RAG_POLICY_DIR=policies,RAG_MAX_POLICY_CHARS=30000"
-```
-
-A szabályzat fájlok a backend forráskóddal együtt deployolódnak (source deploy), ha a `policies/` mappában vannak. Kikapcsoláshoz módosítsd a `RAG_ENABLED` értékét a `deploy.yml`-ban, vagy futtasd a fenti `gcloud run services update` parancsot.
-
-### Miért nevezhető ez RAG-nek?
-
-A **RAG** (Retrieval Augmented Generation) lényege nem a vektor adatbázis, hanem a **három lépés**:
+### A három lépés
 
 | Lépés | Mit jelent? | Ebben a projektben |
 |-------|-------------|-------------------|
-| **R – Retrieval (lekérés)** | Külső tudásbázisból releváns részek kiválasztása | A `backend/rag.py` betölti a `policies/` mappában lévő szabályzat fájlokat, bekezdésekre bontja őket, majd a `RAG_MAX_POLICY_CHARS` limiten belül kiválasztja a promptba kerülő darabokat |
-| **A – Augmentation (kiegészítés)** | A lekért tudás hozzáadása a modell bemenetéhez | A kiválasztott szabályzati szöveg bekerül a Gemini promptjába a PDF és az `ANALYSIS_PROMPT` mellett (`build_rag_prompt`) |
-| **G – Generation (generálás)** | A modell a kiegészített kontextussal válaszol | A Gemini elemzi a szerződést **és** összeveti a belső szabályzatokkal; extra `policy_findings` mezőt ad vissza |
-
-Tehát RAG azért, mert a modell **nem a betanított memóriájából** „tudja”, mi a céges szabály – hanem futásidőben **lekérjük** a szabályzatot, **beillesztjük** a kérésbe, és **ez alapján** generálódik a válasz.
-
-RAG nélkül a Gemini csak a PDF-et és az általános elemzési promptot látja. RAG-gel ugyanaz az elemzés fut, de a prompt **kiegészül** a céges belső szabályokkal – ez pont az „Augmented” rész.
+| **R – Retrieval** | A tudástárból a kérdéshez hasonló részek | `retrieveContexts` a corpuson. A keresőkérdés a szerződés szövege |
+| **A – Augmentation** | A talált szöveg bekerül a modell bemenetébe | `build_rag_prompt` a PDF és az `ANALYSIS_PROMPT` mellé teszi |
+| **G – Generation** | A modell a kiegészített kontextussal válaszol | A Gemini a szerződést és a szabályzat-részleteket együtt értékeli, `policy_findings` mezővel |
 
 ```mermaid
 flowchart TB
-    subgraph R["1. Retrieval – lekérés"]
-        F1["policies/*.md"]
-        F2["Darabolás chunk-okra"]
-        F3["Kiválasztás limiten belül"]
-        F1 --> F2 --> F3
+    subgraph R["1. Retrieval"]
+        F1["policy/ a corpusban"]
+        F2["retrieveContexts"]
+        F1 --> F2
     end
 
-    subgraph A["2. Augmentation – kiegészítés"]
+    subgraph A["2. Augmentation"]
         P1["PDF szerződés"]
         P2["ANALYSIS_PROMPT"]
-        P3["Szabályzati kontextus"]
+        P3["Szabályzat-részletek"]
         P1 --> PROMPT["Összeállított prompt"]
         P2 --> PROMPT
         P3 --> PROMPT
     end
 
-    subgraph G["3. Generation – generálás"]
+    subgraph G["3. Generation"]
         GEM["Gemini válasz<br/>summary + policy_findings"]
     end
 
-    F3 --> P3
+    F2 --> P3
     PROMPT --> GEM
 
     style R fill:#EFF6FF,stroke:#2563EB
@@ -915,13 +896,4 @@ flowchart TB
     style G fill:#F3E8FF,stroke:#9333EA
 ```
 
-### Korlátok és egyszerűség
-
-Ez egy **egyszerűsített RAG** – a minta ugyanaz (lekérés → kiegészítés → generálás), de a lekérés nem szemantikus keresés:
-
-- **Nincs külön vektor adatbázis** – a szabályzatok közvetlenül fájlokból töltődnek (`policies/*.md`, `.txt`), nem Pinecone/Chroma/Vertex AI Vector Search.
-- **Nincs embedding API** – nem számítunk szöveg-vektorokat, és nem a szerződéshez legközelebbi chunk-okat keressük. Ha kevés a szabályzat, szinte mind bekerül; ha sok, a `RAG_MAX_POLICY_CHARS` limit miatt **round-robin** módon választunk darabokat (minden szabályzatból arányosan). Ez kisebb tudásbázisnál (tipikus céges policy-készlet) gyakran elég; nagy, sok száz oldalas könyvtárnál már kevésbé pontos.
-- **Nem „full RAG”** – az ipari, nagy skálájú megoldások embedding + vektor keresést használnak. Itt szándékosan egyszerűbb utat választottunk: kevesebb infrastruktúra, ugyanaz az API és deploy, backend szinten ki-be kapcsolható (`RAG_ENABLED`), elemzésenként pedig a UI jelölőnégyzet.
-- **Nem kötelező** – production-ben is kikapcsolva hagyható; a meglévő workflow érintetlen marad.
-
-Összefoglalva: **RAG-lite** vagy **fájl-alapú kontextus-RAG** – nem kevésbé „RAG”, csak kevésbé komplex lekérési réteggel, mint egy embedding-alapú rendszer.
+A Cloud Run, a bucket és a RAG corpus egyaránt `europe-west4`-ben van. A Gemini hívás a `global` végpontra megy. A `teardown-rag.sh` a corpust és a bucketet is törli, mert a RagManaged Spanner külön díjazott. A `teardown.sh` ezt hívja.

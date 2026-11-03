@@ -21,7 +21,13 @@ from api_trace import (
     reset_api_traces,
     snapshot_api_traces,
 )
-from rag import build_policy_retrieval, build_rag_prompt, get_rag_status, is_rag_available
+from rag import (
+    RagRetrievalError,
+    build_rag_prompt,
+    get_rag_status,
+    is_rag_available,
+    retrieve_for_contract,
+)
 
 load_dotenv()
 
@@ -245,25 +251,37 @@ def _trace_error(status_code: int, message: str) -> JSONResponse:
 # --- API-NÉZET VÉGE ---
 
 
-def _retrieve_policy_prompt(file_name: str) -> str:
+def _retrieve_policy_prompt(pdf_bytes: bytes, file_name: str) -> str:
     started = time.perf_counter()
-    retrieval = build_policy_retrieval()
+    try:
+        retrieval = retrieve_for_contract(pdf_bytes)
+    except RagRetrievalError as exc:
+        record_api_call(
+            service="RAG",
+            operation="retrieveContexts",
+            status="error",
+            duration_ms=_elapsed_ms(started),
+            request={**exc.request, "file_name": file_name},
+            error=str(exc),
+        )
+        raise ValueError(f"A szabalyzatok visszakeresese sikertelen: {exc}") from exc
+
     request = {**retrieval.request, "file_name": file_name}
     if not retrieval.context:
         record_api_call(
             service="RAG",
-            operation="retrievePolicies",
+            operation="retrieveContexts",
             status="error",
             duration_ms=_elapsed_ms(started),
             request=request,
             response=retrieval.response,
-            error="Nincs elérhető belső szabályzat a RAG elemzéshez",
+            error="A RAG Engine nem adott vissza szabalyzat-reszletet",
         )
-        raise ValueError("Nincs elerheto belso szabalyzat a RAG elemzeshez")
+        raise ValueError("A RAG Engine nem adott vissza szabalyzat-reszletet")
 
     record_api_call(
         service="RAG",
-        operation="retrievePolicies",
+        operation="retrieveContexts",
         status="ok",
         duration_ms=_elapsed_ms(started),
         request=request,
@@ -364,7 +382,7 @@ async def _analyze_pdf(
     rag_active = use_rag and is_rag_available()
 
     if rag_active:
-        prompt = _retrieve_policy_prompt(file_name)
+        prompt = _retrieve_policy_prompt(pdf_bytes, file_name)
 
     return _generate_analysis(
         pdf_bytes,
@@ -419,7 +437,7 @@ async def analyze(
     if use_rag and not is_rag_available():
         raise HTTPException(
             status_code=400,
-            detail="A RAG modul nincs engedelyezve vagy nincs szabalyzat betoltve",
+            detail="A RAG modul nincs engedelyezve vagy a RAG_CORPUS nincs beallitva",
         )
 
     # CSAK AZ API-NÉZET MIATT – a napló az elemzés végén a válaszba kerül

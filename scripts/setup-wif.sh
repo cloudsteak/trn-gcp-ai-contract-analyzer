@@ -59,7 +59,8 @@ for role in \
   roles/artifactregistry.writer \
   roles/storage.objectAdmin \
   roles/logging.logWriter \
-  roles/serviceusage.serviceUsageConsumer; do
+  roles/serviceusage.serviceUsageConsumer \
+  roles/aiplatform.viewer; do
   add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${CICD_SA_EMAIL}" "${role}"
 done
 
@@ -124,7 +125,10 @@ echo ""
 echo "Kovetkezo lepes (GitHub secrets, gh CLI):"
 echo "  ./scripts/setup-github.sh"
 echo ""
-echo "Teardown (demo ujrainditashoz, forditott sorrendben):"
-echo "  ./scripts/teardown.sh"
+echo "A ./scripts/upload-doc-to-rag.sh nem kovetkezik. A setup.sh mar feltoltette a szabalyzatokat."
+echo "Csak policy/ valtozaskor futtasd ujra, a tobbi setup script nelkul."
+echo ""
+echo "Torles, forditott sorrendben:"
+echo "  ./scripts/teardown.sh            # eloszor a ./scripts/teardown-rag.sh"
 echo "  ./scripts/teardown-wif.sh"
 echo "  ./scripts/teardown-github.sh"

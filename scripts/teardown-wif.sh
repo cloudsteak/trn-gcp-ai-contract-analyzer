@@ -47,7 +47,8 @@ for role in \
   roles/artifactregistry.writer \
   roles/storage.objectAdmin \
   roles/logging.logWriter \
-  roles/serviceusage.serviceUsageConsumer; do
+  roles/serviceusage.serviceUsageConsumer \
+  roles/aiplatform.viewer; do
   gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${CICD_SA_EMAIL}" \
     --role="${role}" \
