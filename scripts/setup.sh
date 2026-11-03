@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
 PROJECT_ID="${GCP_PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-}}"
-REGION="${GCP_REGION:-europe-west1}"
+REGION="${GCP_REGION:-europe-west4}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-contract-analyzer-backend}"
 FRONTEND_SERVICE="${FRONTEND_SERVICE:-contract-analyzer-frontend}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-contract-analyzer-sa}"
@@ -36,6 +36,7 @@ wait_for_service_account "${SA_EMAIL}"
 echo "IAM szerepkorok hozzarendelese a service accounthoz..."
 add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${SA_EMAIL}" "roles/run.invoker"
 add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${SA_EMAIL}" "roles/aiplatform.user"
+add_project_iam_binding "${PROJECT_ID}" "serviceAccount:${SA_EMAIL}" "roles/discoveryengine.viewer"
 
 echo "Cloud Run backend service letrehozasa placeholder image-dzsel..."
 if gcloud run services describe "${BACKEND_SERVICE}" --region="${REGION}" >/dev/null 2>&1; then
@@ -63,11 +64,22 @@ else
     --quiet
 fi
 
+echo "RAG bucket, szabalyzatok es corpus elokeszitese (tobb perc is lehet)..."
+export GCP_REGION="${REGION}"
+RAG_LOG="$(mktemp)"
+bash "${SCRIPT_DIR}/upload-doc-to-rag.sh" | tee "${RAG_LOG}"
+RAG_CORPUS="$(sed -n 's/^RAG_CORPUS=//p' "${RAG_LOG}" | tail -1)"
+rm -f "${RAG_LOG}"
+if [[ -z "${RAG_CORPUS}" ]]; then
+  echo "Hiba: a upload-doc-to-rag.sh nem adott vissza RAG_CORPUS erteket."
+  exit 1
+fi
+
 echo "Backend kornyezeti valtozok beallitasa..."
 gcloud run services update "${BACKEND_SERVICE}" \
   --region="${REGION}" \
   --service-account="${SA_EMAIL}" \
-  --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*,RAG_ENABLED=true,RAG_POLICY_DIR=policies,RAG_MAX_POLICY_CHARS=30000"
+  --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*,RAG_ENABLED=true,RAG_CORPUS=${RAG_CORPUS}"
 
 echo "Frontend kornyezeti valtozok beallitasa..."
 BACKEND_URL="$(gcloud run services describe "${BACKEND_SERVICE}" --region="${REGION}" --format='value(status.url)')"
@@ -81,7 +93,16 @@ echo "Backend URL: ${BACKEND_URL}"
 FRONTEND_URL="$(gcloud run services describe "${FRONTEND_SERVICE}" --region="${REGION}" --format='value(status.url)')"
 echo "Frontend URL: ${FRONTEND_URL}"
 echo ""
+echo "A ./scripts/upload-doc-to-rag.sh nem kulon lepes. A setup.sh most lefuttatta:"
+echo "feltoltotte a policy/ szabalyzatokat a corpusba."
+echo "Egyedul csak akkor futtasd ujra, ha a policy/ mappaban valtozik egy szabalyzat."
+echo ""
 echo "Kovetkezo lepes: GitHub Actions WIF beallitasa (JSON kulcs nelkul):"
 echo "  export GITHUB_REPO=<szervezet>/<repo-nev>"
 echo "  ./scripts/setup-wif.sh"
 echo "  ./scripts/setup-github.sh"
+echo ""
+echo "Torles, forditott sorrendben:"
+echo "  ./scripts/teardown.sh            # eloszor a ./scripts/teardown-rag.sh"
+echo "  ./scripts/teardown-wif.sh"
+echo "  ./scripts/teardown-github.sh"

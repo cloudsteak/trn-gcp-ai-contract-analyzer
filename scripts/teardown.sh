@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 PROJECT_ID="${GCP_PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-}}"
-REGION="${GCP_REGION:-europe-west1}"
+REGION="${GCP_REGION:-europe-west4}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-contract-analyzer-backend}"
 FRONTEND_SERVICE="${FRONTEND_SERVICE:-contract-analyzer-frontend}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-contract-analyzer-sa}"
@@ -15,6 +17,11 @@ fi
 
 echo "GCP projekt beallitasa: ${PROJECT_ID}"
 gcloud config set project "${PROJECT_ID}"
+
+echo "RAG corpus es bucket torlese..."
+export GCP_REGION="${REGION}"
+export SKIP_CLOUD_RUN_ENV=1
+bash "${SCRIPT_DIR}/teardown-rag.sh"
 
 echo "Cloud Run backend service torlese..."
 if gcloud run services describe "${BACKEND_SERVICE}" --region="${REGION}" >/dev/null 2>&1; then
@@ -46,3 +53,9 @@ else
 fi
 
 echo "Teardown kesz."
+echo "A ./scripts/teardown-rag.sh a teardown.sh elejen futott: corpus es bucket."
+echo "Onalloan csak akkor kell, ha a Cloud Run megmarad, de a RAG-et torolni akarod."
+echo ""
+echo "Kovetkezo lepes:"
+echo "  ./scripts/teardown-wif.sh"
+echo "  ./scripts/teardown-github.sh"
