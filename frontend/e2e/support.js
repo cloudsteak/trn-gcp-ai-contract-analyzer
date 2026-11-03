@@ -128,8 +128,11 @@ function analysisBody(useRag) {
       status: "ok",
       duration_ms: 15,
       occurred_at: at,
-      request: { method: "RETRIEVE", endpoint: "local://policies" },
-      response: { policy_count: 2 },
+      request: {
+        method: "POST",
+        endpoint: "https://europe-west4-aiplatform.googleapis.com/v1/projects/demo/locations/europe-west4:retrieveContexts",
+      },
+      response: { chunk_count: 2 },
       error: null,
     });
   }
