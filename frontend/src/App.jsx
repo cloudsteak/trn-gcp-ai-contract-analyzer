@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ApiTracePanel, { ApiTraceToggle } from "./components/ApiTracePanel.jsx";
+import ContractPreview from "./components/ContractPreview.jsx";
 import { useCallLog } from "./hooks/useCallLog.js";
 import { analyzeContract as requestAnalysis, getRagStatus } from "./services/api.js";
 
@@ -42,6 +43,7 @@ function getQualityClass(level) {
 function App() {
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -73,8 +75,11 @@ function App() {
     loadRagStatus();
   }, []);
 
+  const closePreview = useCallback(() => setPreviewOpen(false), []);
+
   const handleFileSelection = (file) => {
     const validationError = validatePdf(file);
+    setPreviewOpen(false);
     if (validationError) {
       setError(validationError);
       setSelectedFile(null);
@@ -168,10 +173,20 @@ function App() {
             />
             <p className="dropzone-title">Húzd ide a PDF-et</p>
             <p className="dropzone-subtitle">vagy kattints a fájl kiválasztásához</p>
-            {selectedFile && (
-              <p className="selected-file">Kiválasztva: {selectedFile.name}</p>
-            )}
           </div>
+
+          {selectedFile && (
+            <div className="selected-file-bar">
+              <p className="selected-file">Kiválasztva: {selectedFile.name}</p>
+              <button
+                type="button"
+                className="preview-open"
+                onClick={() => setPreviewOpen(true)}
+              >
+                Szerződés megtekintése
+              </button>
+            </div>
+          )}
 
           {ragAvailable && (
             <button
@@ -355,6 +370,9 @@ function App() {
       </main>
       {showApiCalls && <ApiTracePanel calls={apiCalls} />}
       </div>
+      {previewOpen && selectedFile && (
+        <ContractPreview file={selectedFile} onClose={closePreview} />
+      )}
     </div>
   );
 }
