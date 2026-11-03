@@ -174,14 +174,17 @@ function App() {
           </div>
 
           {ragAvailable && (
-            <label className="rag-toggle">
-              <input
-                type="checkbox"
-                checked={useRag}
-                onChange={(event) => setUseRag(event.target.checked)}
-              />
+            <button
+              type="button"
+              className={`rag-toggle${useRag ? " rag-toggle--on" : ""}`}
+              aria-pressed={useRag}
+              onClick={() => setUseRag((enabled) => !enabled)}
+            >
+              <span className="rag-toggle-track" aria-hidden="true">
+                <span className="rag-toggle-thumb" />
+              </span>
               <span>Belső szabályzatokkal összevetés (RAG)</span>
-            </label>
+            </button>
           )}
 
           <button

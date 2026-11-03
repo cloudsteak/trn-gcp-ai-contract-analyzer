@@ -13,7 +13,7 @@ test("üres oldalon az elemzés le van tiltva", async ({ page }) => {
   await expect(page.getByText("vagy kattints a fájl kiválasztásához")).toBeVisible();
   await expect(page.getByText("PDF szerződés feltöltése és Gemini-alapú elemzés")).toBeVisible();
   await expect(page.getByRole("button", { name: /Elemzés indítása/ })).toBeDisabled();
-  await expect(page.getByRole("checkbox", { name: /Belső szabályzatokkal/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Belső szabályzatokkal/ })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Összefoglaló" })).toHaveCount(0);
 
   await shot(page, "01-ures-kepernyo.png");
@@ -102,9 +102,11 @@ test("a mockolt eredmény és a folyamatjelző", async ({ page }) => {
 
 test("a rag összevetés a szabályzatokat mutatja", async ({ page }) => {
   const state = await openApp(page, { ragAvailable: true });
-  const rag = page.getByRole("checkbox", { name: "Belső szabályzatokkal összevetés (RAG)" });
+  const rag = page.getByRole("button", { name: "Belső szabályzatokkal összevetés (RAG)" });
   await expect(rag).toBeVisible();
-  await rag.check();
+  await expect(rag).toHaveAttribute("aria-pressed", "false");
+  await rag.click();
+  await expect(rag).toHaveAttribute("aria-pressed", "true");
 
   await choosePdf(page);
   await page.getByRole("button", { name: /Elemzés indítása/ }).click();
