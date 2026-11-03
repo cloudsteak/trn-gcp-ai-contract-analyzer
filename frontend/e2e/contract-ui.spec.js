@@ -13,7 +13,8 @@ test("üres oldalon az elemzés le van tiltva", async ({ page }) => {
   await expect(page.getByText("vagy kattints a fájl kiválasztásához")).toBeVisible();
   await expect(page.getByText("PDF szerződés feltöltése és Gemini-alapú elemzés")).toBeVisible();
   await expect(page.getByRole("button", { name: /Elemzés indítása/ })).toBeDisabled();
-  await expect(page.getByRole("checkbox", { name: /Belső szabályzatokkal/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Szerződés megtekintése" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Belső szabályzatokkal/ })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Összefoglaló" })).toHaveCount(0);
 
   await shot(page, "01-ures-kepernyo.png");
@@ -25,8 +26,34 @@ test("a kiválasztott pdf engedélyezi az elemzést", async ({ page }) => {
   await choosePdf(page);
 
   await expect(page.getByText("Kiválasztva: szerzodes.pdf")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Szerződés megtekintése" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Elemzés indítása/ })).toBeEnabled();
   await shot(page, "02-kivalasztott-fajl.png");
+});
+
+test("a feltöltött szerződés lightboxban megnyílik", async ({ page }) => {
+  await openApp(page);
+  await choosePdf(page);
+
+  await page.getByRole("button", { name: "Szerződés megtekintése" }).click();
+  const dialog = page.getByRole("dialog", { name: "szerzodes.pdf" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "szerzodes.pdf" })).toBeVisible();
+  await expect(dialog.locator("iframe")).toHaveAttribute("src", /^blob:/);
+  await shot(page, "02b-szerzodes-elonezet.png");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Szerződés megtekintése" }).click();
+  await expect(dialog).toBeVisible();
+  await page.locator(".preview-backdrop").click({ position: { x: 8, y: 8 } });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Szerződés megtekintése" }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Bezárás" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("a szöveges fájl nem választható", async ({ page }) => {
@@ -45,6 +72,7 @@ test("a szöveges fájl nem választható", async ({ page }) => {
   await expect(analyzeRequest).rejects.toThrow();
   await expect(page.getByRole("alert")).toHaveText("Csak PDF fájl tölthető fel.");
   await expect(page.getByText(/Kiválasztva:/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Szerződés megtekintése" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Elemzés indítása/ })).toBeDisabled();
 });
 
@@ -102,9 +130,11 @@ test("a mockolt eredmény és a folyamatjelző", async ({ page }) => {
 
 test("a rag összevetés a szabályzatokat mutatja", async ({ page }) => {
   const state = await openApp(page, { ragAvailable: true });
-  const rag = page.getByRole("checkbox", { name: "Belső szabályzatokkal összevetés (RAG)" });
+  const rag = page.getByRole("button", { name: "Belső szabályzatokkal összevetés (RAG)" });
   await expect(rag).toBeVisible();
-  await rag.check();
+  await expect(rag).toHaveAttribute("aria-pressed", "false");
+  await rag.click();
+  await expect(rag).toHaveAttribute("aria-pressed", "true");
 
   await choosePdf(page);
   await page.getByRole("button", { name: /Elemzés indítása/ }).click();

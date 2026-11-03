@@ -111,7 +111,7 @@ curl "${BACKEND_URL}/rag/status"
 # Várható: "enabled": true, "available": true, es a corpus resource neve
 ```
 
-Ha a RAG elérhető, a frontenden megjelenik a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzet. Jelöld be elemzés előtt – az eredmény tartalmazza a megszokott mezőket **plusz** a `policy_findings` listát (szabályzati megfelelés / figyelmeztetés / sértés). A jelölőnégyzet nélkül sima PDF-elemzés fut.
+Ha a RAG elérhető, a frontenden megjelenik a **„Belső szabályzatokkal összevetés (RAG)”** kapcsoló. Kapcsold be elemzés előtt – az eredmény tartalmazza a megszokott mezőket **plusz** a `policy_findings` listát (szabályzati megfelelés / figyelmeztetés / sértés). A kapcsoló nélkül sima PDF-elemzés fut.
 
 **Kikapcsolás (opcionális)**
 
@@ -829,7 +829,7 @@ RAG_TOP_K=8
 | Változó | Alapértelmezés | Jelentés |
 |---------|----------------|----------|
 | `RAG_ENABLED` | `true` | RAG modul elérhető-e (`false` = kikapcsolva) |
-| `RAG_CORPUS` | üres | Corpus resource neve. Enélkül a jelölőnégyzet nem jelenik meg |
+| `RAG_CORPUS` | üres | Corpus resource neve. Enélkül a kapcsoló nem jelenik meg |
 | `RAG_LOCATION` | `europe-west4` | RAG Engine régió, ugyanaz, mint a Cloud Run |
 | `RAG_TOP_K` | `8` | Legfeljebb ennyi részlet kerül a promptba |
 | `RAG_RANKER` | `semantic-ranker-default@latest` | A találatok újrarendezése |
@@ -846,7 +846,7 @@ gcloud run services update contract-analyzer-backend \
 
 ### UI és API
 
-Ha `RAG_ENABLED=true` és a `RAG_CORPUS` be van állítva, a frontend megjeleníti a **„Belső szabályzatokkal összevetés (RAG)”** jelölőnégyzetet.
+Ha `RAG_ENABLED=true` és a `RAG_CORPUS` be van állítva, a frontend megjeleníti a **„Belső szabályzatokkal összevetés (RAG)”** kapcsolót.
 
 | Végpont | Leírás |
 |---------|--------|
