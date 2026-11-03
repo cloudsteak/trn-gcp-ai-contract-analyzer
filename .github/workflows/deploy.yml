@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  GCP_REGION: europe-west1
+  GCP_REGION: europe-west4
   BACKEND_SERVICE: contract-analyzer-backend
   FRONTEND_SERVICE: contract-analyzer-frontend
 
@@ -30,6 +30,31 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      - name: Resolve RAG corpus
+        id: rag
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          RAG_LOCATION="${GCP_REGION}"
+          DISPLAY_NAME=contract-regulations
+          CORPUS="$(curl -fsS \
+            -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+            "https://${RAG_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${RAG_LOCATION}/ragCorpora?pageSize=100" \
+            | python3 -c '
+          import json, sys
+          display = sys.argv[1]
+          data = json.load(sys.stdin)
+          for corpus in data.get("ragCorpora") or []:
+              if corpus.get("displayName") == display:
+                  print(corpus.get("name", ""))
+                  break
+          ' "${DISPLAY_NAME}")"
+          if [[ -z "${CORPUS}" ]]; then
+            echo "Hiba: nincs ${DISPLAY_NAME} RAG corpus. Futtasd: ./scripts/upload-doc-to-rag.sh"
+            exit 1
+          fi
+          echo "corpus=${CORPUS}" >> "${GITHUB_OUTPUT}"
+
       - name: Deploy backend to Cloud Run
         working-directory: backend
         env:
@@ -45,7 +70,7 @@ jobs:
             --quiet \
             --service-account "${RUNTIME_SA}" \
             --build-service-account "projects/${PROJECT_ID}/serviceAccounts/${CICD_SA}" \
-            --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*,RAG_ENABLED=true,RAG_POLICY_DIR=policies,RAG_MAX_POLICY_CHARS=30000"
+            --set-env-vars="GEMINI_MODEL=gemini-3.5-flash,GCP_PROJECT_ID=${PROJECT_ID},GEMINI_LOCATION=global,CORS_ORIGINS=*,RAG_ENABLED=true,RAG_CORPUS=${{ steps.rag.outputs.corpus }}"
 
   deploy-frontend:
     runs-on: ubuntu-latest
