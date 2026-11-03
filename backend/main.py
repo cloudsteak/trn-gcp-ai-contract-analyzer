@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Literal
@@ -79,10 +80,11 @@ class ContractQuality(BaseModel):
 
 
 class AnalysisResult(BaseModel):
-    contract_quality: ContractQuality
+    # Sorrend = ANALYSIS_PROMPT. A response_schema propertyOrdering ezt követi.
     summary: str = Field(..., max_length=4000)
     key_clauses: list[KeyClause]
     risk_flags: list[RiskFlag]
+    contract_quality: ContractQuality
 
 
 class TokenUsage(BaseModel):
@@ -127,7 +129,27 @@ def _build_genai_client() -> genai.Client:
 
 
 class RagAnalysisPayload(AnalysisResult):
-    policy_findings: list[PolicyFinding] = Field(default_factory=list)
+    policy_findings: list[PolicyFinding]
+
+
+def _analysis_model(rag_active: bool) -> type[AnalysisResult]:
+    return RagAnalysisPayload if rag_active else AnalysisResult
+
+
+def _load_json_object(raw_text: str) -> Any:
+    """A modell néha kódblokkot vagy bevezető szöveget tesz a JSON köré."""
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, count=1, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(text[start : end + 1])
 
 
 def _parse_analysis_response(
@@ -136,7 +158,7 @@ def _parse_analysis_response(
     include_policy_findings: bool,
 ) -> tuple[AnalysisResult, list[PolicyFinding] | None]:
     try:
-        payload = json.loads(raw_text)
+        payload = _load_json_object(raw_text)
     except json.JSONDecodeError as exc:
         raise ValueError("A Gemini válasz nem érvényes JSON") from exc
 
@@ -207,6 +229,8 @@ def _gemini_request(
         "prompt_chars": len(prompt),
         "config": {
             "response_mime_type": "application/json",
+            "response_schema": _analysis_model(rag_active).__name__,
+            "thinking_level": "LOW",
             "temperature": 0.2,
         },
         "contents": [
@@ -308,7 +332,14 @@ def _generate_analysis(
                 prompt,
             ],
             config=types.GenerateContentConfig(
+                # A mime type önmagában csak javaslat. Séma nélkül a
+                # gemini-3.5-flash alapértelmezett gondolkodása RAG nélkül
+                # gyakran nem JSON szöveget ad vissza.
                 response_mime_type="application/json",
+                response_schema=_analysis_model(rag_active),
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=types.ThinkingLevel.LOW,
+                ),
                 temperature=0.2,
             ),
         )
